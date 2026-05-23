@@ -3,6 +3,7 @@ module github.com/winthrop-intelligence/winthrop-cli
 go 1.26.3
 
 require (
+	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.1
 	github.com/zalando/go-keyring v0.2.6
 )

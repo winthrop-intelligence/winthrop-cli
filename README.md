@@ -15,6 +15,8 @@ export WINTHROP_SCOPES="openid profile offline_access"
 
 `WINTHROP_SCOPES` is optional and accepts space-separated OAuth scopes.
 
+For local development, you can put the same keys in a `.env` file in the working directory. Real environment variables take precedence over values from `.env`.
+
 ## Interactive Login
 
 ```sh
