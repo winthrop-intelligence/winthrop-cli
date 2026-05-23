@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	loginTimeout  = 15 * time.Minute
-	requestTimout = 30 * time.Second
+	loginTimeout   = 15 * time.Minute
+	requestTimeout = 30 * time.Second
 )
 
 type app struct {
@@ -30,7 +30,7 @@ type app struct {
 
 func NewRootCommand() *cobra.Command {
 	return newRootCommand(app{
-		httpClient: &http.Client{Timeout: requestTimout},
+		httpClient: &http.Client{Timeout: requestTimeout},
 		store:      store.NewKeyringStore(),
 	})
 }
@@ -223,11 +223,20 @@ func (a app) doctorCommand() *cobra.Command {
 
 				activeKey := store.ActiveKey(cfg)
 				account, err := a.store.GetActiveAccount(activeKey)
-				if err != nil {
+				switch {
+				case errors.Is(err, keyring.ErrNotFound):
 					ok = false
 					fmt.Fprintln(cmd.OutOrStdout(), "login: FAIL: no stored login")
 					fmt.Fprintln(cmd.OutOrStdout(), "fix: run winthrop login")
-				} else {
+				case err != nil:
+					ok = false
+					fmt.Fprintf(cmd.OutOrStdout(), "login: FAIL: could not read stored login: %v\n", err)
+					fmt.Fprintln(cmd.OutOrStdout(), "fix: unlock or configure your OS credential store, then retry.")
+				case account == "":
+					ok = false
+					fmt.Fprintln(cmd.OutOrStdout(), "login: FAIL: stored login is invalid")
+					fmt.Fprintln(cmd.OutOrStdout(), "fix: run winthrop logout, then run winthrop login")
+				default:
 					fmt.Fprintln(cmd.OutOrStdout(), "login: ok")
 					if _, err := a.refreshAccessToken(cmd.Context(), cfg); err != nil {
 						ok = false
@@ -250,12 +259,21 @@ func (a app) doctorCommand() *cobra.Command {
 func (a app) refreshAccessToken(ctx context.Context, cfg config.Config) (oauth.TokenResponse, error) {
 	activeKey := store.ActiveKey(cfg)
 	account, err := a.store.GetActiveAccount(activeKey)
-	if err != nil {
+	if errors.Is(err, keyring.ErrNotFound) {
 		return oauth.TokenResponse{}, errors.New("not logged in; run winthrop login")
 	}
-	refreshToken, err := a.store.GetRefreshToken(account)
 	if err != nil {
+		return oauth.TokenResponse{}, fmt.Errorf("read stored login: %w", err)
+	}
+	if account == "" {
+		return oauth.TokenResponse{}, errors.New("stored login is invalid; run winthrop logout, then run winthrop login")
+	}
+	refreshToken, err := a.store.GetRefreshToken(account)
+	if errors.Is(err, keyring.ErrNotFound) {
 		return oauth.TokenResponse{}, errors.New("could not read stored login; run winthrop login")
+	}
+	if err != nil {
+		return oauth.TokenResponse{}, fmt.Errorf("read refresh token: %w", err)
 	}
 	token, err := oauth.Client{Config: cfg, HTTP: a.httpClient}.Refresh(ctx, refreshToken)
 	if err != nil {

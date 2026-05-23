@@ -6,7 +6,7 @@ This repository currently contains the bootstrap for `winthrop-cli`, a cross-pla
 
 Recommended Go layout:
 
-- `cmd/winthrop-cli/`: CLI entry point.
+- `cmd/winthrop/`: CLI entry point.
 - `internal/`: private OAuth, config, and API client packages.
 - `pkg/`: exported packages intended for external reuse.
 - `testdata/`: fixtures used by Go tests.
@@ -22,7 +22,7 @@ Once `go.mod` exists, use standard Go tooling:
 - `go build ./...`: compile all packages.
 - `go test ./...`: run the full test suite.
 - `go test -cover ./...`: run tests with package coverage.
-- `go run ./cmd/winthrop-cli --help`: run the CLI locally.
+- `go run ./cmd/winthrop --help`: run the CLI locally.
 
 If scripts or a `Makefile` are added, keep them thin wrappers around these commands.
 
