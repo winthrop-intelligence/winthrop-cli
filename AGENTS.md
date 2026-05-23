@@ -14,6 +14,8 @@ Recommended Go layout:
 
 Do not commit binaries, coverage files, workspace files, or secrets; `.gitignore` already excludes common Go outputs and `.env`.
 
+Keep `.env.example` in sync with every supported configuration variable. It should contain safe placeholder values only, never real client IDs for private environments or secrets.
+
 ## Build, Test, and Development Commands
 
 Once `go.mod` exists, use standard Go tooling:
