@@ -4,14 +4,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"time"
 
 	"github.com/zalando/go-keyring"
 
 	"github.com/winthrop-intelligence/winthrop-cli/internal/config"
 )
 
-const service = "winthrop"
+const (
+	service               = "winthrop"
+	healthcheckAccount    = "healthcheck"
+	healthcheckCredential = "ok"
+)
 
 type Store interface {
 	Available() error
@@ -41,11 +44,10 @@ func RefreshAccount(cfg config.Config, subject string) string {
 }
 
 func (KeyringStore) Available() error {
-	account := "healthcheck:" + digest(time.Now().UTC().Format(time.RFC3339Nano))
-	if err := keyring.Set(service, account, "ok"); err != nil {
+	if err := keyring.Set(service, healthcheckAccount, healthcheckCredential); err != nil {
 		return err
 	}
-	return keyring.Delete(service, account)
+	return keyring.Delete(service, healthcheckAccount)
 }
 
 func (KeyringStore) SaveRefreshToken(account string, token string) error {

@@ -91,6 +91,9 @@ func (a app) loginCommand() *cobra.Command {
 			if err != nil {
 				return stderrError(cmd, fmt.Errorf("login failed: %w", err))
 			}
+			if token.RefreshToken == "" {
+				return stderrError(cmd, errors.New("login succeeded but no refresh token was returned; include offline_access in WINTHROP_SCOPES and run winthrop login again"))
+			}
 
 			identity, identityErr := api.Client{Config: cfg, HTTP: a.httpClient}.Me(cmd.Context(), token.AccessToken)
 			subject := api.Subject(identity)
@@ -288,7 +291,6 @@ func (a app) refreshAccessToken(ctx context.Context, cfg config.Config) (oauth.T
 }
 
 func stderrError(cmd *cobra.Command, err error) error {
-	fmt.Fprintln(cmd.ErrOrStderr(), "error:", err)
 	return err
 }
 

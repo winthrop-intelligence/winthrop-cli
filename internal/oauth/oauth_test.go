@@ -69,6 +69,22 @@ func TestPollTokenHandlesPendingThenSuccess(t *testing.T) {
 	}
 }
 
+func TestPollTokenAcceptsResponseWithoutRefreshToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(TokenResponse{AccessToken: "access"})
+	}))
+	defer server.Close()
+
+	client := Client{Config: config.Config{AuthBaseURL: server.URL, ClientID: "client"}, HTTP: server.Client()}
+	token, err := client.PollToken(context.Background(), DeviceAuthorization{DeviceCode: "device", Interval: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.AccessToken != "access" || token.RefreshToken != "" {
+		t.Fatalf("token=%+v", token)
+	}
+}
+
 func TestRefresh(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {

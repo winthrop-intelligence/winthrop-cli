@@ -126,6 +126,49 @@ func TestTokenCommandPrintsOnlyAccessTokenAndRotatesRefreshToken(t *testing.T) {
 	}
 }
 
+func TestLoginReportsMissingRefreshTokenGuidance(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/device_authorization":
+			_ = json.NewEncoder(w).Encode(oauth.DeviceAuthorization{
+				DeviceCode:      "device",
+				UserCode:        "user",
+				VerificationURI: "https://verify.example.com",
+				ExpiresIn:       60,
+				Interval:        1,
+			})
+		case "/oauth/token":
+			_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "access-token"})
+		default:
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+	}))
+	defer authServer.Close()
+
+	apiServer := httptest.NewServer(http.NotFoundHandler())
+	defer apiServer.Close()
+
+	t.Setenv(config.EnvAuthBaseURL, authServer.URL)
+	t.Setenv(config.EnvAPIBaseURL, apiServer.URL)
+	t.Setenv(config.EnvClientID, "client")
+
+	cmd := newRootCommand(app{httpClient: authServer.Client(), store: newFakeStore()})
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"login"})
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "offline_access") {
+		t.Fatalf("error = %q", err)
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestRefreshAccessTokenReportsActiveAccountStorageFailure(t *testing.T) {
 	cfg := config.Config{AuthBaseURL: "https://auth.example.com", APIBaseURL: "https://api.example.com", ClientID: "client"}
 	fake := newFakeStore()

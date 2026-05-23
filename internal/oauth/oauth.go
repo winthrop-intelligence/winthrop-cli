@@ -131,8 +131,8 @@ func (c Client) exchangeDeviceCode(ctx context.Context, deviceCode string) (Toke
 	if err := c.postForm(ctx, c.Config.TokenURL(), form, &token); err != nil {
 		return TokenResponse{}, err
 	}
-	if token.AccessToken == "" || token.RefreshToken == "" {
-		return TokenResponse{}, errors.New("token response missing access_token or refresh_token")
+	if token.AccessToken == "" {
+		return TokenResponse{}, errors.New("token response missing access_token")
 	}
 	return token, nil
 }
