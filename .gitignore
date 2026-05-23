@@ -7,6 +7,9 @@
 *.dll
 *.so
 *.dylib
+/winthrop
+/bin/
+/dist/
 
 # Test binary, built with `go test -c`
 *.test
