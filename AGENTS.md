@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository currently contains the bootstrap for `winthrop-cli`, a cross-platform OAuth grant CLI for API users. Keep top-level files focused on repository configuration and contributor documentation.
+This repository is `winthrop-cli`; it builds the `winthrop` binary, a cross-platform OAuth grant CLI for API users. Keep top-level files focused on repository configuration and contributor documentation.
 
 Recommended Go layout:
 

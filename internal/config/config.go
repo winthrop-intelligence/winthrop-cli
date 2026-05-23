@@ -101,7 +101,14 @@ func normalizeBaseURL(raw string, envName string) (string, error) {
 	if parsed.Scheme != "https" && parsed.Scheme != "http" {
 		return "", fmt.Errorf("%s must use http or https", envName)
 	}
+	if parsed.Scheme == "http" && !isLocalhost(parsed.Hostname()) {
+		return "", fmt.Errorf("%s must use https unless the host is localhost, 127.0.0.1, or ::1", envName)
+	}
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return strings.TrimRight(parsed.String(), "/"), nil
+}
+
+func isLocalhost(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
