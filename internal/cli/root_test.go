@@ -129,7 +129,7 @@ func TestTokenCommandPrintsOnlyAccessTokenAndRotatesRefreshToken(t *testing.T) {
 func TestLoginReportsMissingRefreshTokenGuidance(t *testing.T) {
 	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/oauth/device_authorization":
+		case "/oauth/authorize_device":
 			_ = json.NewEncoder(w).Encode(oauth.DeviceAuthorization{
 				DeviceCode:      "device",
 				UserCode:        "user",
