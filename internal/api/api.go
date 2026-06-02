@@ -1,11 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/winthrop-intelligence/winthrop-cli/internal/config"
@@ -44,7 +46,9 @@ func (c Client) Me(ctx context.Context, accessToken string) (Identity, error) {
 		return nil, fmt.Errorf("API returned HTTP %d", resp.StatusCode)
 	}
 	var identity Identity
-	if err := json.Unmarshal(body, &identity); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&identity); err != nil {
 		return nil, fmt.Errorf("decode API response: %w", err)
 	}
 	return identity, nil
@@ -69,7 +73,7 @@ func (c Client) Reachable(ctx context.Context) error {
 func Subject(identity Identity) string {
 	for _, key := range []string{"sub", "id", "user_id", "email", "username"} {
 		if value, ok := identity[key]; ok {
-			text := strings.TrimSpace(fmt.Sprint(value))
+			text := strings.TrimSpace(formatValue(value))
 			if text != "" && text != "<nil>" {
 				return text
 			}
@@ -82,7 +86,7 @@ func Summary(identity Identity) string {
 	var parts []string
 	for _, key := range []string{"id", "sub", "email", "username", "name", "scopes", "scope"} {
 		if value, ok := identity[key]; ok {
-			text := strings.TrimSpace(fmt.Sprint(value))
+			text := strings.TrimSpace(formatValue(value))
 			if text != "" && text != "<nil>" {
 				parts = append(parts, key+"="+text)
 			}
@@ -92,6 +96,19 @@ func Summary(identity Identity) string {
 		return "authenticated"
 	}
 	return strings.Join(parts, "\n")
+}
+
+func formatValue(value any) string {
+	switch v := value.(type) {
+	case json.Number:
+		return v.String()
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
+	default:
+		return fmt.Sprint(value)
+	}
 }
 
 func (c Client) httpClient() HTTPDoer {

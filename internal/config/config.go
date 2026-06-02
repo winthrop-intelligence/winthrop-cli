@@ -70,7 +70,7 @@ func LoadFromLookup(lookup func(string) (string, bool)) (Config, error) {
 }
 
 func (c Config) DeviceAuthorizationURL() string {
-	return c.AuthBaseURL + "/oauth/device_authorization"
+	return c.AuthBaseURL + "/oauth/authorize_device"
 }
 
 func (c Config) TokenURL() string {

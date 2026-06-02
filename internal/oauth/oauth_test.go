@@ -15,7 +15,7 @@ import (
 func TestRequestDeviceAuthorization(t *testing.T) {
 	var body string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/oauth/device_authorization" {
+		if r.URL.Path != "/oauth/authorize_device" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
 		if err := r.ParseForm(); err != nil {
