@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -85,6 +86,33 @@ func TestPollTokenAcceptsResponseWithoutRefreshToken(t *testing.T) {
 	}
 }
 
+func TestPollTokenReturnsTerminalOAuthErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		errorCode string
+		want      error
+	}{
+		{name: "access denied", errorCode: "access_denied", want: ErrAccessDenied},
+		{name: "expired token", errorCode: "expired_token", want: ErrExpiredToken},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": tt.errorCode})
+			}))
+			defer server.Close()
+
+			client := Client{Config: config.Config{AuthBaseURL: server.URL, ClientID: "client"}, HTTP: server.Client()}
+			_, err := client.PollToken(context.Background(), DeviceAuthorization{DeviceCode: "device", Interval: 1})
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestRefresh(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -104,5 +132,66 @@ func TestRefresh(t *testing.T) {
 	}
 	if token.AccessToken != "access" || token.RefreshToken != "new" {
 		t.Fatalf("token = %+v", token)
+	}
+}
+
+func TestRefreshRejectsMalformedJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{`))
+	}))
+	defer server.Close()
+
+	client := Client{Config: config.Config{AuthBaseURL: server.URL, ClientID: "client"}, HTTP: server.Client()}
+	_, err := client.Refresh(context.Background(), "refresh")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "decode OAuth response") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestRefreshReportsOAuthErrorDescription(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error":             "invalid_grant",
+			"error_description": "refresh token expired",
+		})
+	}))
+	defer server.Close()
+
+	client := Client{Config: config.Config{AuthBaseURL: server.URL, ClientID: "client"}, HTTP: server.Client()}
+	_, err := client.Refresh(context.Background(), "refresh")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "invalid_grant: refresh token expired") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestRefreshReportsGenericHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`not json`))
+	}))
+	defer server.Close()
+
+	client := Client{Config: config.Config{AuthBaseURL: server.URL, ClientID: "client"}, HTTP: server.Client()}
+	_, err := client.Refresh(context.Background(), "refresh")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "OAuth server returned HTTP 500") {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestParseOAuthErrorRecognizesSlowDown(t *testing.T) {
+	err := parseOAuthError(http.StatusBadRequest, []byte(`{"error":"slow_down"}`))
+	if !errors.Is(err, ErrSlowDown) {
+		t.Fatalf("error = %v, want %v", err, ErrSlowDown)
 	}
 }

@@ -71,6 +71,85 @@ func (s *fakeStore) ClearActiveAccount(activeKey string) error {
 	return nil
 }
 
+func TestLoginStoresRefreshTokenAndActiveAccount(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/authorize_device":
+			if err := r.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if r.Form.Get("client_id") != "client" {
+				t.Fatalf("client_id = %q", r.Form.Get("client_id"))
+			}
+			_ = json.NewEncoder(w).Encode(oauth.DeviceAuthorization{
+				DeviceCode:              "device",
+				UserCode:                "user-code",
+				VerificationURI:         "https://verify.example.com",
+				VerificationURIComplete: "https://verify.example.com?code=user-code",
+				ExpiresIn:               60,
+				Interval:                1,
+			})
+		case "/oauth/token":
+			if err := r.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if r.Form.Get("device_code") != "device" {
+				t.Fatalf("device_code = %q", r.Form.Get("device_code"))
+			}
+			_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "access-token", RefreshToken: "refresh-token"})
+		default:
+			t.Fatalf("auth path = %s", r.URL.Path)
+		}
+	}))
+	defer authServer.Close()
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/users/me" {
+			t.Fatalf("api path = %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "subject", "email": "user@example.com"})
+	}))
+	defer apiServer.Close()
+
+	t.Setenv(config.EnvAuthBaseURL, authServer.URL)
+	t.Setenv(config.EnvAPIBaseURL, apiServer.URL)
+	t.Setenv(config.EnvClientID, "client")
+
+	fake := newFakeStore()
+	cmd := newRootCommand(app{httpClient: authServer.Client(), store: fake})
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"login"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := store.RefreshAccount(cfg, "subject")
+	if got := fake.values["token:"+account]; got != "refresh-token" {
+		t.Fatalf("stored refresh = %q", got)
+	}
+	if got := fake.values["active:"+store.ActiveKey(cfg)]; got != account {
+		t.Fatalf("active account = %q", got)
+	}
+	got := stdout.String()
+	for _, want := range []string{"Open this URL: https://verify.example.com?code=user-code", "Enter code: user-code", "Waiting for authorization", "Logged in as:", "id=subject", "email=user@example.com"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestTokenCommandPrintsOnlyAccessTokenAndRotatesRefreshToken(t *testing.T) {
 	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/token" {
@@ -123,6 +202,102 @@ func TestTokenCommandPrintsOnlyAccessTokenAndRotatesRefreshToken(t *testing.T) {
 	}
 	if got := fake.values["token:"+account]; got != "new-refresh" {
 		t.Fatalf("stored refresh = %q", got)
+	}
+}
+
+func TestWhoamiRefreshesTokenAndPrintsIdentity(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/token" {
+			t.Fatalf("auth path = %s", r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if r.Form.Get("refresh_token") != "refresh-token" {
+			t.Fatalf("refresh_token = %q", r.Form.Get("refresh_token"))
+		}
+		_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "access-token"})
+	}))
+	defer authServer.Close()
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/users/me" {
+			t.Fatalf("api path = %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer access-token" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "subject", "email": "user@example.com"})
+	}))
+	defer apiServer.Close()
+
+	t.Setenv(config.EnvAuthBaseURL, authServer.URL)
+	t.Setenv(config.EnvAPIBaseURL, apiServer.URL)
+	t.Setenv(config.EnvClientID, "client")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeStore()
+	account := store.RefreshAccount(cfg, "subject")
+	if err := fake.SaveRefreshToken(account, "refresh-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.SetActiveAccount(store.ActiveKey(cfg), account); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newRootCommand(app{httpClient: authServer.Client(), store: fake})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"whoami"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := stdout.String()
+	for _, want := range []string{"id=subject", "email=user@example.com"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestLogoutDeletesStoredLogin(t *testing.T) {
+	t.Setenv(config.EnvAuthBaseURL, "https://auth.example.com")
+	t.Setenv(config.EnvAPIBaseURL, "https://api.example.com")
+	t.Setenv(config.EnvClientID, "client")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeStore()
+	account := store.RefreshAccount(cfg, "subject")
+	if err := fake.SaveRefreshToken(account, "refresh-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.SetActiveAccount(store.ActiveKey(cfg), account); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newRootCommand(app{httpClient: http.DefaultClient, store: fake})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"logout"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := fake.values["token:"+account]; ok {
+		t.Fatalf("refresh token still stored for %q", account)
+	}
+	if _, ok := fake.values["active:"+store.ActiveKey(cfg)]; ok {
+		t.Fatalf("active account still stored")
+	}
+	if stdout.String() != "Logged out.\n" {
+		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
 
