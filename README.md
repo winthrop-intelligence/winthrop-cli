@@ -12,9 +12,9 @@ curl -fsSL https://raw.githubusercontent.com/winthrop-intelligence/winthrop-cli/
 
 The installer downloads the correct binary for your OS and architecture, verifies the release checksum, and installs `winthrop` to `$HOME/.local/bin` by default. To install somewhere else:
 
-```sh
-WINTHROP_INSTALL_DIR=/usr/local/bin sh scripts/install.sh
-```
+~~~sh
+curl -fsSL https://raw.githubusercontent.com/winthrop-intelligence/winthrop-cli/main/scripts/install.sh | WINTHROP_INSTALL_DIR=/usr/local/bin sh
+~~~
 
 For Windows, download the `windows_amd64` zip from the latest GitHub release, unzip it, and put `winthrop.exe` on your `PATH`.
 
