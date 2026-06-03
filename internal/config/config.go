@@ -16,10 +16,10 @@ const (
 	EnvClientID    = "WINTHROP_CLIENT_ID"
 	EnvScopes      = "WINTHROP_SCOPES"
 
-	DefaultAuthBaseURL = "https://demo.winad-hq.com"
-	DefaultAPIBaseURL  = "https://api.demo.winad-hq.com"
+	DefaultAuthBaseURL = "https://winad-hq.com"
+	DefaultAPIBaseURL  = "https://api.winad-hq.com"
 	DefaultClientID    = "R4QyAr5wFZ8NTihNnB_O_tgBMYS17wrUZvoxuj4MDs0"
-	DefaultScopes      = "openid profile winad_read offline_access"
+	DefaultScopes      = "winad_read offline_access"
 )
 
 type Config struct {
