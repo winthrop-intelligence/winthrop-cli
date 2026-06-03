@@ -35,10 +35,10 @@ winthrop login
 For local development or support overrides, set any of these environment variables:
 
 ```sh
-export WINTHROP_AUTH_BASE_URL="https://demo.winad-hq.com"
-export WINTHROP_API_BASE_URL="https://api.demo.winad-hq.com"
-export WINTHROP_CLIENT_ID="public-client-id"
-export WINTHROP_SCOPES="openid profile winad_read offline_access"
+# export WINTHROP_AUTH_BASE_URL="https://demo.winad-hq.com"
+# export WINTHROP_API_BASE_URL="https://api.demo.winad-hq.com"
+# export WINTHROP_CLIENT_ID="your-client-id"
+# export WINTHROP_SCOPES="openid profile winad_read offline_access"
 ```
 
 `WINTHROP_SCOPES` accepts space-separated OAuth scopes.
