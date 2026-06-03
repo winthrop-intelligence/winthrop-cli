@@ -35,9 +35,37 @@ func TestLoadFromLookupParsesEnv(t *testing.T) {
 	}
 }
 
-func TestLoadFromLookupRequiresEnv(t *testing.T) {
-	_, err := LoadFromLookup(func(string) (string, bool) {
+func TestLoadFromLookupUsesDefaults(t *testing.T) {
+	cfg, err := LoadFromLookup(func(string) (string, bool) {
 		return "", false
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthBaseURL != DefaultAuthBaseURL {
+		t.Fatalf("AuthBaseURL = %q", cfg.AuthBaseURL)
+	}
+	if cfg.APIBaseURL != DefaultAPIBaseURL {
+		t.Fatalf("APIBaseURL = %q", cfg.APIBaseURL)
+	}
+	if cfg.ClientID != DefaultClientID {
+		t.Fatalf("ClientID = %q", cfg.ClientID)
+	}
+	if cfg.ScopeString() != DefaultScopes {
+		t.Fatalf("ScopeString = %q", cfg.ScopeString())
+	}
+}
+
+func TestLoadFromLookupRejectsEmptyOverrides(t *testing.T) {
+	values := map[string]string{
+		EnvAuthBaseURL: "",
+		EnvAPIBaseURL:  "",
+		EnvClientID:    "",
+	}
+
+	_, err := LoadFromLookup(func(key string) (string, bool) {
+		value, ok := values[key]
+		return value, ok
 	})
 	if err == nil {
 		t.Fatal("expected error")

@@ -2,18 +2,46 @@
 
 `winthrop` is a cross-platform Go CLI for Winthrop API users. It uses OAuth2 Device Authorization Grant, stores refresh tokens in the OS credential store when available, and prints short-lived access tokens for generated API clients.
 
-## Configuration
+## Installation
 
-Set the required environment variables:
+For macOS and Linux, install the latest GitHub release:
 
 ```sh
-export WINTHROP_AUTH_BASE_URL="https://auth.example.com"
-export WINTHROP_API_BASE_URL="https://api.example.com"
-export WINTHROP_CLIENT_ID="winthrop-cli"
-export WINTHROP_SCOPES="openid profile offline_access"
+curl -fsSL https://raw.githubusercontent.com/winthrop-intelligence/winthrop-cli/main/scripts/install.sh | sh
 ```
 
-`WINTHROP_SCOPES` is optional and accepts space-separated OAuth scopes.
+The installer downloads the correct binary for your OS and architecture, verifies the release checksum, and installs `winthrop` to `$HOME/.local/bin` by default. To install somewhere else:
+
+```sh
+WINTHROP_INSTALL_DIR=/usr/local/bin sh scripts/install.sh
+```
+
+For Windows, download the `windows_amd64` zip from the latest GitHub release, unzip it, and put `winthrop.exe` on your `PATH`.
+
+Check the installed version:
+
+```sh
+winthrop version
+```
+
+## Configuration
+
+Production auth, API, client ID, and scopes are built into the released CLI. Most users do not need to configure anything before running:
+
+```sh
+winthrop login
+```
+
+For local development or support overrides, set any of these environment variables:
+
+```sh
+export WINTHROP_AUTH_BASE_URL="https://demo.winad-hq.com"
+export WINTHROP_API_BASE_URL="https://api.demo.winad-hq.com"
+export WINTHROP_CLIENT_ID="public-client-id"
+export WINTHROP_SCOPES="openid profile winad_read offline_access"
+```
+
+`WINTHROP_SCOPES` accepts space-separated OAuth scopes.
 
 For local development, you can put the same keys in a `.env` file in the working directory. Real environment variables take precedence over values from `.env`.
 
@@ -69,6 +97,7 @@ winthrop token    # print a short-lived access token
 winthrop whoami   # print the current user from /api/v1/users/me
 winthrop logout   # delete the stored refresh token
 winthrop doctor   # check config, storage, reachability, and login state
+winthrop version  # print version and build metadata
 ```
 
 ## Troubleshooting
@@ -86,6 +115,17 @@ Common fixes:
 - Not logged in: run `winthrop login`.
 - Token refresh failure: run `winthrop login` again.
 - Auth/API unreachable: verify the base URL environment variables and network access.
+
+## Releases
+
+Maintainers publish a release by pushing a version tag:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow builds Linux, macOS, and Windows binaries and publishes checksums with the release artifacts.
 
 ## Development
 

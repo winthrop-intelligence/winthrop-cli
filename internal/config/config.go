@@ -15,6 +15,11 @@ const (
 	EnvAPIBaseURL  = "WINTHROP_API_BASE_URL"
 	EnvClientID    = "WINTHROP_CLIENT_ID"
 	EnvScopes      = "WINTHROP_SCOPES"
+
+	DefaultAuthBaseURL = "https://demo.winad-hq.com"
+	DefaultAPIBaseURL  = "https://api.demo.winad-hq.com"
+	DefaultClientID    = "R4QyAr5wFZ8NTihNnB_O_tgBMYS17wrUZvoxuj4MDs0"
+	DefaultScopes      = "openid profile winad_read offline_access"
 )
 
 type Config struct {
@@ -33,10 +38,10 @@ func Load() (Config, error) {
 
 func LoadFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	cfg := Config{
-		AuthBaseURL: envString(lookup, EnvAuthBaseURL),
-		APIBaseURL:  envString(lookup, EnvAPIBaseURL),
-		ClientID:    envString(lookup, EnvClientID),
-		Scopes:      strings.Fields(envString(lookup, EnvScopes)),
+		AuthBaseURL: envString(lookup, EnvAuthBaseURL, DefaultAuthBaseURL),
+		APIBaseURL:  envString(lookup, EnvAPIBaseURL, DefaultAPIBaseURL),
+		ClientID:    envString(lookup, EnvClientID, DefaultClientID),
+		Scopes:      strings.Fields(envString(lookup, EnvScopes, DefaultScopes)),
 	}
 
 	var missing []string
@@ -85,8 +90,11 @@ func (c Config) ScopeString() string {
 	return strings.Join(c.Scopes, " ")
 }
 
-func envString(lookup func(string) (string, bool), name string) string {
-	value, _ := lookup(name)
+func envString(lookup func(string) (string, bool), name string, defaultValue string) string {
+	value, ok := lookup(name)
+	if !ok {
+		return defaultValue
+	}
 	return strings.TrimSpace(value)
 }
 
