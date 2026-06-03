@@ -121,7 +121,7 @@ Common fixes:
 Maintainers publish a release by pushing a version tag:
 
 ```sh
-git tag v0.1.0
+git tag -s v0.1.0 -m "v0.1.0"
 git push origin v0.1.0
 ```
 
