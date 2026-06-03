@@ -23,6 +23,12 @@ const (
 	requestTimeout = 30 * time.Second
 )
 
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
 type app struct {
 	httpClient *http.Client
 	store      store.Store
@@ -48,6 +54,7 @@ func newRootCommand(a app) *cobra.Command {
 		a.whoamiCommand(),
 		a.logoutCommand(),
 		a.doctorCommand(),
+		versionCommand(),
 	)
 	return cmd
 }
@@ -255,6 +262,16 @@ func (a app) doctorCommand() *cobra.Command {
 				return errors.New("doctor found problems")
 			}
 			return nil
+		},
+	}
+}
+
+func versionCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the Winthrop CLI version",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Fprintf(cmd.OutOrStdout(), "winthrop %s\ncommit: %s\nbuilt: %s\n", version, commit, date)
 		},
 	}
 }

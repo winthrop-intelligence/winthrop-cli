@@ -198,3 +198,67 @@ func TestRefreshAccessTokenRejectsEmptyActiveAccount(t *testing.T) {
 		t.Fatalf("error = %q", err)
 	}
 }
+
+func TestDoctorDoesNotReportMissingConfigWhenConfigured(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			t.Fatalf("auth method = %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			t.Fatalf("api method = %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer apiServer.Close()
+
+	t.Setenv(config.EnvAuthBaseURL, authServer.URL)
+	t.Setenv(config.EnvAPIBaseURL, apiServer.URL)
+	t.Setenv(config.EnvClientID, "client")
+
+	cmd := newRootCommand(app{httpClient: authServer.Client(), store: newFakeStore()})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"doctor"})
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("expected login failure")
+	}
+
+	got := stdout.String()
+	if strings.Contains(got, "config: FAIL") {
+		t.Fatalf("stdout = %q", got)
+	}
+	for _, want := range []string{"config: ok", "auth server: ok", "api server: ok", "login: FAIL: no stored login"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestVersionCommandPrintsBuildMetadata(t *testing.T) {
+	oldVersion, oldCommit, oldDate := version, commit, date
+	t.Cleanup(func() {
+		version, commit, date = oldVersion, oldCommit, oldDate
+	})
+	version, commit, date = "v1.2.3", "abc123", "2026-06-03T00:00:00Z"
+
+	cmd := newRootCommand(app{httpClient: http.DefaultClient, store: newFakeStore()})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := stdout.String()
+	for _, want := range []string{"winthrop v1.2.3", "commit: abc123", "built: 2026-06-03T00:00:00Z"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	}
+}
