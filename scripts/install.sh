@@ -65,7 +65,7 @@ curl -fsSLo "$tmpdir/checksums.txt" "$base_url/checksums.txt"
 
 (
   cd "$tmpdir"
-  expected="$(grep " $archive$" checksums.txt || true)"
+  expected="$(grep -F " $archive" checksums.txt || true)"
   if [ -z "$expected" ]; then
     echo "error: checksum not found for $archive" >&2
     exit 1
