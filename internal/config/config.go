@@ -18,7 +18,7 @@ const (
 
 	DefaultAuthBaseURL = "https://winad-hq.com"
 	DefaultAPIBaseURL  = "https://api.winad-hq.com"
-	DefaultClientID    = "R4QyAr5wFZ8NTihNnB_O_tgBMYS17wrUZvoxuj4MDs0"
+	DefaultClientID    = "SFfPY4ItExi17n7fRlilkDtNXPV2HtrZ3vXcpN8pGTo"
 	DefaultScopes      = "winad_read offline_access"
 )
 
