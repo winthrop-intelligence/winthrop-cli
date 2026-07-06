@@ -812,7 +812,7 @@ func TestDoctorReportsAccessTokenCacheStatus(t *testing.T) {
 	}{
 		{
 			name:       "usable",
-			cacheValue: cachedTokenPayload(t, "cached-access", time.Now().Add(2*time.Minute)),
+			cacheValue: cachedTokenPayload(t, "cached-access", time.Now().Add(tokenRefreshWindow+time.Minute)),
 			want:       "access token cache: ok, expires at ",
 		},
 		{
@@ -821,7 +821,7 @@ func TestDoctorReportsAccessTokenCacheStatus(t *testing.T) {
 		},
 		{
 			name:       "refresh needed",
-			cacheValue: cachedTokenPayload(t, "cached-access", time.Now().Add(30*time.Second)),
+			cacheValue: cachedTokenPayload(t, "cached-access", time.Now().Add(tokenRefreshWindow/2)),
 			want:       "access token cache: refresh needed, expires at ",
 		},
 		{
