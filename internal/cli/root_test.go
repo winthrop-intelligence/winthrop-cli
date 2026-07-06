@@ -293,6 +293,42 @@ func TestTokenCommandUsesFreshCachedAccessToken(t *testing.T) {
 	}
 }
 
+func TestTokenCommandUsesFreshCachedAccessTokenWhenRefreshTokenMissing(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected token refresh")
+	}))
+	defer authServer.Close()
+
+	t.Setenv(config.EnvAuthBaseURL, authServer.URL)
+	t.Setenv(config.EnvAPIBaseURL, "https://api.example.com")
+	t.Setenv(config.EnvClientID, "client")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeStore()
+	account := store.RefreshAccount(cfg, "subject")
+	if err := fake.SetActiveAccount(store.ActiveKey(cfg), account); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.SaveAccessToken(account, cachedTokenPayload(t, "cached-access", time.Now().Add(2*time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newRootCommand(app{httpClient: authServer.Client(), store: fake})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"token"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	if stdout.String() != "cached-access\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func TestTokenCommandRefreshesExpiredCachedAccessToken(t *testing.T) {
 	refreshes := 0
 	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

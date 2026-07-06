@@ -302,15 +302,15 @@ func (a app) refreshAccessToken(ctx context.Context, cfg config.Config) (oauth.T
 	if account == "" {
 		return oauth.TokenResponse{}, errors.New("stored login is invalid; run winthrop logout, then run winthrop login")
 	}
+	if token, ok := a.cachedAccessToken(account, time.Now()); ok {
+		return token, nil
+	}
 	refreshToken, err := a.store.GetRefreshToken(account)
 	if errors.Is(err, keyring.ErrNotFound) {
 		return oauth.TokenResponse{}, errors.New("could not read stored login; run winthrop login")
 	}
 	if err != nil {
 		return oauth.TokenResponse{}, fmt.Errorf("read refresh token: %w", err)
-	}
-	if token, ok := a.cachedAccessToken(account, time.Now()); ok {
-		return token, nil
 	}
 	token, err := oauth.Client{Config: cfg, HTTP: a.httpClient}.Refresh(ctx, refreshToken)
 	if err != nil {
