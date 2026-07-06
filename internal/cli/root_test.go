@@ -94,7 +94,7 @@ func cachedTokenPayload(t *testing.T, accessToken string, expiresAt time.Time) s
 	t.Helper()
 	payload, err := json.Marshal(cachedAccessToken{
 		AccessToken: accessToken,
-		ExpiresAt:   expiresAt.Format(accessTokenTimeForm),
+		ExpiresAt:   expiresAt.Format(accessTokenTimeFormat),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -245,7 +245,7 @@ func TestTokenCommandPrintsOnlyAccessTokenAndRotatesRefreshToken(t *testing.T) {
 	if cached.AccessToken != "access-token" {
 		t.Fatalf("cached access token = %q", cached.AccessToken)
 	}
-	expiresAt, err := time.Parse(accessTokenTimeForm, cached.ExpiresAt)
+	expiresAt, err := time.Parse(accessTokenTimeFormat, cached.ExpiresAt)
 	if err != nil {
 		t.Fatal(err)
 	}

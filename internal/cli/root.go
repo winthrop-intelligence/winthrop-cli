@@ -23,7 +23,7 @@ const (
 	loginTimeout        = 15 * time.Minute
 	requestTimeout      = 30 * time.Second
 	tokenRefreshWindow  = 60 * time.Second
-	accessTokenTimeForm = time.RFC3339
+	accessTokenTimeFormat = time.RFC3339
 )
 
 var (
@@ -339,7 +339,7 @@ func (a app) cachedAccessToken(account string, now time.Time) (oauth.TokenRespon
 	if cached.AccessToken == "" || cached.ExpiresAt == "" {
 		return oauth.TokenResponse{}, false
 	}
-	expiresAt, err := time.Parse(accessTokenTimeForm, cached.ExpiresAt)
+	expiresAt, err := time.Parse(accessTokenTimeFormat, cached.ExpiresAt)
 	if err != nil {
 		return oauth.TokenResponse{}, false
 	}
@@ -355,7 +355,7 @@ func (a app) saveAccessToken(account string, token oauth.TokenResponse, now time
 	}
 	cached := cachedAccessToken{
 		AccessToken: token.AccessToken,
-		ExpiresAt:   now.Add(time.Duration(token.ExpiresIn) * time.Second).Format(accessTokenTimeForm),
+		ExpiresAt:   now.Add(time.Duration(token.ExpiresIn) * time.Second).Format(accessTokenTimeFormat),
 	}
 	payload, err := json.Marshal(cached)
 	if err != nil {
