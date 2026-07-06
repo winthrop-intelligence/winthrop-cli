@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,8 +20,10 @@ import (
 )
 
 const (
-	loginTimeout   = 15 * time.Minute
-	requestTimeout = 30 * time.Second
+	loginTimeout        = 15 * time.Minute
+	requestTimeout      = 30 * time.Second
+	tokenRefreshWindow  = 60 * time.Second
+	accessTokenTimeForm = time.RFC3339
 )
 
 var (
@@ -32,6 +35,11 @@ var (
 type app struct {
 	httpClient *http.Client
 	store      store.Store
+}
+
+type cachedAccessToken struct {
+	AccessToken string `json:"access_token"`
+	ExpiresAt   string `json:"expires_at"`
 }
 
 func NewRootCommand() *cobra.Command {
@@ -108,6 +116,9 @@ func (a app) loginCommand() *cobra.Command {
 			if err := a.store.SaveRefreshToken(account, token.RefreshToken); err != nil {
 				return stderrError(cmd, fmt.Errorf("store refresh token: %w", err))
 			}
+			if err := a.saveAccessToken(account, token, time.Now()); err != nil {
+				return stderrError(cmd, err)
+			}
 			if err := a.store.SetActiveAccount(store.ActiveKey(cfg), account); err != nil {
 				return stderrError(cmd, fmt.Errorf("store active login: %w", err))
 			}
@@ -181,6 +192,9 @@ func (a app) logoutCommand() *cobra.Command {
 			if account != "" {
 				if err := a.store.DeleteRefreshToken(account); err != nil {
 					return stderrError(cmd, fmt.Errorf("delete refresh token: %w", err))
+				}
+				if err := a.store.DeleteAccessToken(account); err != nil {
+					return stderrError(cmd, fmt.Errorf("delete cached access token: %w", err))
 				}
 			}
 			if err := a.store.ClearActiveAccount(activeKey); err != nil {
@@ -295,6 +309,9 @@ func (a app) refreshAccessToken(ctx context.Context, cfg config.Config) (oauth.T
 	if err != nil {
 		return oauth.TokenResponse{}, fmt.Errorf("read refresh token: %w", err)
 	}
+	if token, ok := a.cachedAccessToken(account, time.Now()); ok {
+		return token, nil
+	}
 	token, err := oauth.Client{Config: cfg, HTTP: a.httpClient}.Refresh(ctx, refreshToken)
 	if err != nil {
 		return oauth.TokenResponse{}, err
@@ -304,7 +321,50 @@ func (a app) refreshAccessToken(ctx context.Context, cfg config.Config) (oauth.T
 			return oauth.TokenResponse{}, fmt.Errorf("store rotated refresh token: %w", err)
 		}
 	}
+	if err := a.saveAccessToken(account, token, time.Now()); err != nil {
+		return oauth.TokenResponse{}, err
+	}
 	return token, nil
+}
+
+func (a app) cachedAccessToken(account string, now time.Time) (oauth.TokenResponse, bool) {
+	raw, err := a.store.GetAccessToken(account)
+	if err != nil {
+		return oauth.TokenResponse{}, false
+	}
+	var cached cachedAccessToken
+	if err := json.Unmarshal([]byte(raw), &cached); err != nil {
+		return oauth.TokenResponse{}, false
+	}
+	if cached.AccessToken == "" || cached.ExpiresAt == "" {
+		return oauth.TokenResponse{}, false
+	}
+	expiresAt, err := time.Parse(accessTokenTimeForm, cached.ExpiresAt)
+	if err != nil {
+		return oauth.TokenResponse{}, false
+	}
+	if !expiresAt.After(now.Add(tokenRefreshWindow)) {
+		return oauth.TokenResponse{}, false
+	}
+	return oauth.TokenResponse{AccessToken: cached.AccessToken}, true
+}
+
+func (a app) saveAccessToken(account string, token oauth.TokenResponse, now time.Time) error {
+	if token.AccessToken == "" || token.ExpiresIn <= 0 {
+		return nil
+	}
+	cached := cachedAccessToken{
+		AccessToken: token.AccessToken,
+		ExpiresAt:   now.Add(time.Duration(token.ExpiresIn) * time.Second).Format(accessTokenTimeForm),
+	}
+	payload, err := json.Marshal(cached)
+	if err != nil {
+		return fmt.Errorf("encode cached access token: %w", err)
+	}
+	if err := a.store.SaveAccessToken(account, string(payload)); err != nil {
+		return fmt.Errorf("store cached access token: %w", err)
+	}
+	return nil
 }
 
 func stderrError(cmd *cobra.Command, err error) error {
