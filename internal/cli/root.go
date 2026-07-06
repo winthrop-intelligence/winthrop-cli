@@ -42,6 +42,24 @@ type cachedAccessToken struct {
 	ExpiresAt   string `json:"expires_at"`
 }
 
+type accessTokenCacheState int
+
+const (
+	accessTokenCacheMissing accessTokenCacheState = iota
+	accessTokenCacheReadError
+	accessTokenCacheInvalid
+	accessTokenCacheUsable
+	accessTokenCacheRefreshNeeded
+	accessTokenCacheExpired
+)
+
+type accessTokenCacheStatus struct {
+	Token     oauth.TokenResponse
+	ExpiresAt time.Time
+	State     accessTokenCacheState
+	Err       error
+}
+
 func NewRootCommand() *cobra.Command {
 	return newRootCommand(app{
 		httpClient: &http.Client{Timeout: requestTimeout},
@@ -262,6 +280,7 @@ func (a app) doctorCommand() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStdout(), "fix: run winthrop logout, then run winthrop login")
 				default:
 					fmt.Fprintln(cmd.OutOrStdout(), "login: ok")
+					fmt.Fprintln(cmd.OutOrStdout(), a.accessTokenCacheSummary(account, time.Now()))
 					if _, err := a.refreshAccessToken(cmd.Context(), cfg); err != nil {
 						ok = false
 						fmt.Fprintf(cmd.OutOrStdout(), "token refresh: FAIL: %v\n", err)
@@ -302,8 +321,8 @@ func (a app) refreshAccessToken(ctx context.Context, cfg config.Config) (oauth.T
 	if account == "" {
 		return oauth.TokenResponse{}, errors.New("stored login is invalid; run winthrop logout, then run winthrop login")
 	}
-	if token, ok := a.cachedAccessToken(account, time.Now()); ok {
-		return token, nil
+	if status := a.inspectAccessTokenCache(account, time.Now()); status.State == accessTokenCacheUsable {
+		return status.Token, nil
 	}
 	refreshToken, err := a.store.GetRefreshToken(account)
 	if errors.Is(err, keyring.ErrNotFound) {
@@ -327,26 +346,59 @@ func (a app) refreshAccessToken(ctx context.Context, cfg config.Config) (oauth.T
 	return token, nil
 }
 
-func (a app) cachedAccessToken(account string, now time.Time) (oauth.TokenResponse, bool) {
+func (a app) inspectAccessTokenCache(account string, now time.Time) accessTokenCacheStatus {
 	raw, err := a.store.GetAccessToken(account)
+	if errors.Is(err, keyring.ErrNotFound) {
+		return accessTokenCacheStatus{State: accessTokenCacheMissing}
+	}
 	if err != nil {
-		return oauth.TokenResponse{}, false
+		return accessTokenCacheStatus{State: accessTokenCacheReadError, Err: err}
 	}
 	var cached cachedAccessToken
 	if err := json.Unmarshal([]byte(raw), &cached); err != nil {
-		return oauth.TokenResponse{}, false
+		return accessTokenCacheStatus{State: accessTokenCacheInvalid}
 	}
 	if cached.AccessToken == "" || cached.ExpiresAt == "" {
-		return oauth.TokenResponse{}, false
+		return accessTokenCacheStatus{State: accessTokenCacheInvalid}
 	}
 	expiresAt, err := time.Parse(accessTokenTimeFormat, cached.ExpiresAt)
 	if err != nil {
-		return oauth.TokenResponse{}, false
+		return accessTokenCacheStatus{State: accessTokenCacheInvalid}
 	}
-	if !expiresAt.After(now.Add(tokenRefreshWindow)) {
-		return oauth.TokenResponse{}, false
+	status := accessTokenCacheStatus{
+		Token:     oauth.TokenResponse{AccessToken: cached.AccessToken},
+		ExpiresAt: expiresAt,
 	}
-	return oauth.TokenResponse{AccessToken: cached.AccessToken}, true
+	if expiresAt.After(now.Add(tokenRefreshWindow)) {
+		status.State = accessTokenCacheUsable
+		return status
+	}
+	if expiresAt.After(now) {
+		status.State = accessTokenCacheRefreshNeeded
+		return status
+	}
+	status.State = accessTokenCacheExpired
+	return status
+}
+
+func (a app) accessTokenCacheSummary(account string, now time.Time) string {
+	status := a.inspectAccessTokenCache(account, now)
+	switch status.State {
+	case accessTokenCacheMissing:
+		return "access token cache: missing"
+	case accessTokenCacheReadError:
+		return fmt.Sprintf("access token cache: unreadable: %v", status.Err)
+	case accessTokenCacheInvalid:
+		return "access token cache: unreadable"
+	case accessTokenCacheUsable:
+		return fmt.Sprintf("access token cache: ok, expires at %s", status.ExpiresAt.Format(accessTokenTimeFormat))
+	case accessTokenCacheRefreshNeeded:
+		return fmt.Sprintf("access token cache: refresh needed, expires at %s", status.ExpiresAt.Format(accessTokenTimeFormat))
+	case accessTokenCacheExpired:
+		return fmt.Sprintf("access token cache: expired at %s", status.ExpiresAt.Format(accessTokenTimeFormat))
+	default:
+		return "access token cache: unreadable"
+	}
 }
 
 func (a app) saveAccessToken(account string, token oauth.TokenResponse, now time.Time) error {
