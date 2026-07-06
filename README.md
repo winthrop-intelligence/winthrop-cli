@@ -56,6 +56,7 @@ The command prints a verification URL and user code, attempts to open the browse
 ## Access Tokens
 
 `winthrop token` is designed for scripts. It prints only the access token to stdout; errors and guidance go to stderr.
+The CLI caches the current access token in secure storage and reuses it until it has less than 60 seconds left before expiration.
 
 ```sh
 TOKEN="$(winthrop token)"
