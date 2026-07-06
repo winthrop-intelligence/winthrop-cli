@@ -22,6 +22,7 @@ type fakeStore struct {
 	values           map[string]string
 	activeAccountErr error
 	refreshTokenErr  error
+	accessTokenErr   error
 }
 
 func newFakeStore() *fakeStore {
@@ -57,6 +58,9 @@ func (s *fakeStore) SaveAccessToken(account string, token string) error {
 }
 
 func (s *fakeStore) GetAccessToken(account string) (string, error) {
+	if s.accessTokenErr != nil {
+		return "", s.accessTokenErr
+	}
 	value, ok := s.values["access:"+account]
 	if !ok {
 		return "", keyring.ErrNotFound
@@ -681,6 +685,83 @@ func TestRefreshAccessTokenRejectsEmptyActiveAccount(t *testing.T) {
 	}
 }
 
+func TestAccessTokenCacheSummaryClassifiesCacheStates(t *testing.T) {
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, time.UTC)
+	account := "refresh:account"
+
+	tests := []struct {
+		name       string
+		cacheValue string
+		cacheErr   error
+		want       string
+	}{
+		{
+			name: "missing",
+			want: "access token cache: missing",
+		},
+		{
+			name:     "read error",
+			cacheErr: errors.New("keychain locked"),
+			want:     "access token cache: unreadable: keychain locked",
+		},
+		{
+			name:       "malformed json",
+			cacheValue: "not json",
+			want:       "access token cache: unreadable",
+		},
+		{
+			name:       "missing access token",
+			cacheValue: `{"expires_at":"2026-07-06T12:02:00Z"}`,
+			want:       "access token cache: unreadable",
+		},
+		{
+			name:       "malformed timestamp",
+			cacheValue: `{"access_token":"cached-access","expires_at":"soon"}`,
+			want:       "access token cache: unreadable",
+		},
+		{
+			name:       "usable",
+			cacheValue: cachedTokenPayload(t, "cached-access", now.Add(61*time.Second)),
+			want:       "access token cache: ok, expires at 2026-07-06T12:01:01Z",
+		},
+		{
+			name:       "exact refresh boundary",
+			cacheValue: cachedTokenPayload(t, "cached-access", now.Add(tokenRefreshWindow)),
+			want:       "access token cache: refresh needed, expires at 2026-07-06T12:01:00Z",
+		},
+		{
+			name:       "refresh needed",
+			cacheValue: cachedTokenPayload(t, "cached-access", now.Add(30*time.Second)),
+			want:       "access token cache: refresh needed, expires at 2026-07-06T12:00:30Z",
+		},
+		{
+			name:       "expired",
+			cacheValue: cachedTokenPayload(t, "cached-access", now.Add(-time.Second)),
+			want:       "access token cache: expired at 2026-07-06T11:59:59Z",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newFakeStore()
+			fake.accessTokenErr = tt.cacheErr
+			if tt.cacheValue != "" {
+				if err := fake.SaveAccessToken(account, tt.cacheValue); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			got := (app{store: fake}).accessTokenCacheSummary(account, now)
+			if got != tt.want {
+				t.Fatalf("summary = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(got, "cached-access") {
+				t.Fatalf("summary leaked access token: %q", got)
+			}
+		})
+	}
+}
+
 func TestDoctorDoesNotReportMissingConfigWhenConfigured(t *testing.T) {
 	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodHead {
@@ -726,6 +807,7 @@ func TestDoctorReportsAccessTokenCacheStatus(t *testing.T) {
 	tests := []struct {
 		name       string
 		cacheValue string
+		cacheErr   error
 		want       string
 	}{
 		{
@@ -751,6 +833,11 @@ func TestDoctorReportsAccessTokenCacheStatus(t *testing.T) {
 			name:       "unreadable",
 			cacheValue: "not json",
 			want:       "access token cache: unreadable",
+		},
+		{
+			name:     "read error",
+			cacheErr: errors.New("keychain locked"),
+			want:     "access token cache: unreadable: keychain locked",
 		},
 	}
 
@@ -785,6 +872,7 @@ func TestDoctorReportsAccessTokenCacheStatus(t *testing.T) {
 				t.Fatal(err)
 			}
 			fake := newFakeStore()
+			fake.accessTokenErr = tt.cacheErr
 			account := store.RefreshAccount(cfg, "subject")
 			if err := fake.SaveRefreshToken(account, "refresh-token"); err != nil {
 				t.Fatal(err)
