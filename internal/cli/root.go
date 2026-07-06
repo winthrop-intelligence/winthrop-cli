@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	loginTimeout        = 15 * time.Minute
-	requestTimeout      = 30 * time.Second
-	tokenRefreshWindow  = 60 * time.Second
+	loginTimeout          = 15 * time.Minute
+	requestTimeout        = 30 * time.Second
+	tokenRefreshWindow    = 60 * time.Second
 	accessTokenTimeFormat = time.RFC3339
 )
 
@@ -117,7 +117,7 @@ func (a app) loginCommand() *cobra.Command {
 				return stderrError(cmd, fmt.Errorf("store refresh token: %w", err))
 			}
 			if err := a.saveAccessToken(account, token, time.Now()); err != nil {
-				return stderrError(cmd, err)
+				return stderrError(cmd, fmt.Errorf("cache login access token: %w", err))
 			}
 			if err := a.store.SetActiveAccount(store.ActiveKey(cfg), account); err != nil {
 				return stderrError(cmd, fmt.Errorf("store active login: %w", err))
@@ -350,7 +350,16 @@ func (a app) cachedAccessToken(account string, now time.Time) (oauth.TokenRespon
 }
 
 func (a app) saveAccessToken(account string, token oauth.TokenResponse, now time.Time) error {
-	if token.AccessToken == "" || token.ExpiresIn <= 0 {
+	if token.AccessToken == "" {
+		if err := a.store.DeleteAccessToken(account); err != nil {
+			return fmt.Errorf("clear cached access token: %w", err)
+		}
+		return nil
+	}
+	if token.ExpiresIn <= 0 {
+		if err := a.store.DeleteAccessToken(account); err != nil {
+			return fmt.Errorf("clear cached access token: %w", err)
+		}
 		return nil
 	}
 	cached := cachedAccessToken{
