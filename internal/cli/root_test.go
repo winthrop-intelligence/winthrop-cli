@@ -722,6 +722,104 @@ func TestDoctorDoesNotReportMissingConfigWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsAccessTokenCacheStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		cacheValue string
+		want       string
+	}{
+		{
+			name:       "usable",
+			cacheValue: cachedTokenPayload(t, "cached-access", time.Now().Add(2*time.Minute)),
+			want:       "access token cache: ok, expires at ",
+		},
+		{
+			name: "missing",
+			want: "access token cache: missing",
+		},
+		{
+			name:       "refresh needed",
+			cacheValue: cachedTokenPayload(t, "cached-access", time.Now().Add(30*time.Second)),
+			want:       "access token cache: refresh needed, expires at ",
+		},
+		{
+			name:       "expired",
+			cacheValue: cachedTokenPayload(t, "cached-access", time.Now().Add(-time.Minute)),
+			want:       "access token cache: expired at ",
+		},
+		{
+			name:       "unreadable",
+			cacheValue: "not json",
+			want:       "access token cache: unreadable",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodHead:
+					w.WriteHeader(http.StatusOK)
+				case http.MethodPost:
+					_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "fresh-access", ExpiresIn: 3600})
+				default:
+					t.Fatalf("auth method = %s", r.Method)
+				}
+			}))
+			defer authServer.Close()
+
+			apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodHead {
+					t.Fatalf("api method = %s", r.Method)
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer apiServer.Close()
+
+			t.Setenv(config.EnvAuthBaseURL, authServer.URL)
+			t.Setenv(config.EnvAPIBaseURL, apiServer.URL)
+			t.Setenv(config.EnvClientID, "client")
+
+			cfg, err := config.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			fake := newFakeStore()
+			account := store.RefreshAccount(cfg, "subject")
+			if err := fake.SaveRefreshToken(account, "refresh-token"); err != nil {
+				t.Fatal(err)
+			}
+			if err := fake.SetActiveAccount(store.ActiveKey(cfg), account); err != nil {
+				t.Fatal(err)
+			}
+			if tt.cacheValue != "" {
+				if err := fake.SaveAccessToken(account, tt.cacheValue); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			cmd := newRootCommand(app{httpClient: authServer.Client(), store: fake})
+			var stdout bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetArgs([]string{"doctor"})
+			if err := cmd.ExecuteContext(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+
+			got := stdout.String()
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("stdout = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(got, "cached-access") || strings.Contains(got, "fresh-access") {
+				t.Fatalf("stdout leaked access token: %q", got)
+			}
+			if !strings.Contains(got, "token refresh: ok") {
+				t.Fatalf("stdout = %q, want token refresh ok", got)
+			}
+		})
+	}
+}
+
 func TestVersionCommandPrintsBuildMetadata(t *testing.T) {
 	oldVersion, oldCommit, oldDate := version, commit, date
 	t.Cleanup(func() {
