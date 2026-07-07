@@ -82,10 +82,6 @@ func (c Config) TokenURL() string {
 	return c.AuthBaseURL + "/oauth/token"
 }
 
-func (c Config) MeURL() string {
-	return c.APIBaseURL + "/api/v1/users/me"
-}
-
 func (c Config) ScopeString() string {
 	return strings.Join(c.Scopes, " ")
 }

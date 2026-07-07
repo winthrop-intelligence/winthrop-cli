@@ -30,9 +30,6 @@ func TestLoadFromLookupParsesEnv(t *testing.T) {
 	if cfg.ScopeString() != "read write" {
 		t.Fatalf("ScopeString = %q", cfg.ScopeString())
 	}
-	if cfg.MeURL() != "https://api.example.com/base/api/v1/users/me" {
-		t.Fatalf("MeURL = %q", cfg.MeURL())
-	}
 }
 
 func TestLoadFromLookupUsesDefaults(t *testing.T) {

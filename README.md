@@ -55,8 +55,17 @@ The command prints a verification URL and user code, attempts to open the browse
 
 ## Access Tokens
 
-`winthrop token` is designed for scripts. It prints only the access token to stdout; errors and guidance go to stderr.
 The CLI caches the current access token in secure storage and reuses it until it has less than 60 seconds left before expiration.
+
+For direct API reads, use `winthrop api` with an API path. It sends the current bearer token automatically and prints the raw response body to stdout:
+
+```sh
+winthrop api "/api/v1/coaches.json?q[first_name_eq]=Jason"
+```
+
+Use `-v` or `--verbose` to print safe request and response metadata to stderr while keeping stdout as the raw API response.
+
+`winthrop token` is still available for scripts and generated clients. It prints only the access token to stdout; errors and guidance go to stderr.
 
 ```sh
 TOKEN="$(winthrop token)"
@@ -95,6 +104,7 @@ Apply the same pattern in Ruby or TypeScript: call `winthrop token` immediately 
 ```sh
 winthrop login    # start device authorization login
 winthrop token    # print a short-lived access token
+winthrop api      # make an authenticated GET request to the Winthrop API
 winthrop whoami   # print the current user from /api/v1/users/me
 winthrop logout   # delete the stored refresh token
 winthrop doctor   # check config, storage, reachability, and login state
