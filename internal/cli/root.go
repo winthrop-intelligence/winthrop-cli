@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -77,6 +79,7 @@ func newRootCommand(a app) *cobra.Command {
 	cmd.AddCommand(
 		a.loginCommand(),
 		a.tokenCommand(),
+		a.apiCommand(),
 		a.whoamiCommand(),
 		a.logoutCommand(),
 		a.doctorCommand(),
@@ -168,6 +171,80 @@ func (a app) tokenCommand() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func (a app) apiCommand() *cobra.Command {
+	var verbose bool
+	cmd := &cobra.Command{
+		Use:   "api PATH",
+		Short: "Make an authenticated GET request to the Winthrop API",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load()
+			if err != nil {
+				return stderrError(cmd, err)
+			}
+			client := api.Client{Config: cfg, HTTP: streamingHTTPClient(a.httpClient)}
+			if _, err := client.ResolvePath(args[0]); err != nil {
+				return stderrError(cmd, err)
+			}
+			token, err := a.refreshAccessToken(cmd.Context(), cfg)
+			if err != nil {
+				return stderrError(cmd, err)
+			}
+			resp, err := client.Stream(cmd.Context(), api.Request{
+				Method:      http.MethodGet,
+				Path:        args[0],
+				AccessToken: token.AccessToken,
+			})
+			if err != nil {
+				return stderrError(cmd, err)
+			}
+			defer resp.Body.Close()
+			if verbose {
+				fmt.Fprintf(cmd.ErrOrStderr(), "%s %s\n", resp.Method, resp.URL)
+				fmt.Fprintf(cmd.ErrOrStderr(), "status: %d\n", resp.StatusCode)
+				if contentType := resp.Header.Get("Content-Type"); contentType != "" {
+					fmt.Fprintf(cmd.ErrOrStderr(), "content-type: %s\n", contentType)
+				}
+				fmt.Fprintf(cmd.ErrOrStderr(), "elapsed: %s\n", resp.Elapsed)
+			}
+			if (resp.StatusCode < 200 || resp.StatusCode > 299) && isHTMLContentType(resp.Header.Get("Content-Type")) {
+				_, _ = io.Copy(io.Discard, resp.Body)
+				return stderrError(cmd, apiHTTPError(resp))
+			}
+			if _, err := io.Copy(cmd.OutOrStdout(), resp.Body); err != nil {
+				return stderrError(cmd, err)
+			}
+			if resp.StatusCode < 200 || resp.StatusCode > 299 {
+				return stderrError(cmd, apiHTTPError(resp))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "print safe request and response metadata to stderr")
+	return cmd
+}
+
+func apiHTTPError(resp api.StreamResponse) error {
+	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
+		return fmt.Errorf("API returned HTTP %d (%s)", resp.StatusCode, contentType)
+	}
+	return fmt.Errorf("API returned HTTP %d", resp.StatusCode)
+}
+
+func isHTMLContentType(contentType string) bool {
+	contentType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	return contentType == "text/html" || contentType == "application/xhtml+xml"
+}
+
+func streamingHTTPClient(client *http.Client) *http.Client {
+	if client == nil {
+		return http.DefaultClient
+	}
+	clone := *client
+	clone.Timeout = 0
+	return &clone
 }
 
 func (a app) whoamiCommand() *cobra.Command {
