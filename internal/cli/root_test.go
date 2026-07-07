@@ -183,7 +183,7 @@ func TestLoginStoresRefreshTokenAndActiveAccount(t *testing.T) {
 		t.Fatalf("active account = %q", got)
 	}
 	got := stdout.String()
-	for _, want := range []string{"Open this URL: https://verify.example.com?code=user-code", "Enter code: user-code", "Waiting for authorization", "Logged in as:", "id=subject", "email=user@example.com"} {
+	for _, want := range []string{"Open this URL: https://verify.example.com?code=user-code", "Enter code: user-code", "Opened browser.", "Waiting for authorization", "Logged in as:", "id=subject", "email=user@example.com"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
@@ -226,14 +226,18 @@ func TestLoginDoesNotOpenBrowserWhenOpenerIsUnset(t *testing.T) {
 	t.Setenv(config.EnvClientID, "client")
 
 	cmd := newRootCommand(app{httpClient: authServer.Client(), store: newFakeStore()})
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"login"})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(stdout.String(), "Opened browser.") {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q", stderr.String())
 	}
 }
 
