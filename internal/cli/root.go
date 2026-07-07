@@ -184,7 +184,7 @@ func (a app) apiCommand() *cobra.Command {
 			if err != nil {
 				return stderrError(cmd, err)
 			}
-			client := api.Client{Config: cfg, HTTP: a.httpClient}
+			client := api.Client{Config: cfg, HTTP: streamingHTTPClient(a.httpClient)}
 			if _, err := client.ResolvePath(args[0]); err != nil {
 				return stderrError(cmd, err)
 			}
@@ -236,6 +236,15 @@ func apiHTTPError(resp api.StreamResponse) error {
 func isHTMLContentType(contentType string) bool {
 	contentType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 	return contentType == "text/html" || contentType == "application/xhtml+xml"
+}
+
+func streamingHTTPClient(client *http.Client) *http.Client {
+	if client == nil {
+		return http.DefaultClient
+	}
+	clone := *client
+	clone.Timeout = 0
+	return &clone
 }
 
 func (a app) whoamiCommand() *cobra.Command {

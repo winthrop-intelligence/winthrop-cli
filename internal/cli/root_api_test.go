@@ -167,6 +167,32 @@ func TestAPICommandPreservesAPIBasePath(t *testing.T) {
 	}
 }
 
+func TestAPICommandStreamsWithoutClientTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("slow"))
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		time.Sleep(25 * time.Millisecond)
+		_, _ = w.Write([]byte(" response"))
+	}))
+	defer server.Close()
+
+	httpClient := server.Client()
+	httpClient.Timeout = 10 * time.Millisecond
+	cmd := newLoggedInAPICommand(t, server.URL, server.URL, httpClient, "cached-access")
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"api", "/slow"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if stdout.String() != "slow response" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func TestAPICommandReturnsErrorAfterPrintingNon2xxBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

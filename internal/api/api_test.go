@@ -31,6 +31,10 @@ func TestResolvePathRejectsInvalidPaths(t *testing.T) {
 		"api/v1/users/me",
 		"https://api.example.com/api/v1/users/me",
 		"//api.example.com/api/v1/users/me",
+		"/../api/v1/users/me",
+		"/api/v1/../users/me",
+		"/%2e%2e/api/v1/users/me",
+		"/api/v1/users/me#fragment",
 	} {
 		t.Run(path, func(t *testing.T) {
 			if _, err := client.ResolvePath(path); err == nil {
@@ -89,6 +93,37 @@ func TestDoSendsAuthHeadersAndReturnsRawResponse(t *testing.T) {
 	}
 	if resp.Elapsed <= 0 {
 		t.Fatalf("Elapsed = %s", resp.Elapsed)
+	}
+}
+
+func TestStreamReportsFinalResponseURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/start":
+			http.Redirect(w, r, "/final", http.StatusFound)
+		case "/final":
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := Client{
+		Config: config.Config{APIBaseURL: server.URL},
+		HTTP:   server.Client(),
+	}
+	resp, err := client.Stream(context.Background(), Request{
+		Path:        "/start",
+		AccessToken: "access-token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.URL != server.URL+"/final" {
+		t.Fatalf("URL = %q", resp.URL)
 	}
 }
 

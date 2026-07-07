@@ -104,12 +104,12 @@ func (c Client) Stream(ctx context.Context, request Request) (StreamResponse, er
 	if err != nil {
 		return StreamResponse{}, err
 	}
+	if request.AccessToken == "" {
+		return StreamResponse{}, errors.New("missing access token")
+	}
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, nil)
 	if err != nil {
 		return StreamResponse{}, err
-	}
-	if request.AccessToken == "" {
-		return StreamResponse{}, errors.New("missing access token")
 	}
 	req.Header.Set("Authorization", "Bearer "+request.AccessToken)
 	req.Header.Set("Accept", "application/json")
@@ -120,9 +120,13 @@ func (c Client) Stream(ctx context.Context, request Request) (StreamResponse, er
 	if err != nil {
 		return StreamResponse{}, err
 	}
+	responseURL := endpoint
+	if resp.Request != nil && resp.Request.URL != nil {
+		responseURL = resp.Request.URL.String()
+	}
 	return StreamResponse{
 		Method:     method,
-		URL:        endpoint,
+		URL:        responseURL,
 		StatusCode: resp.StatusCode,
 		Header:     resp.Header.Clone(),
 		Body:       resp.Body,
@@ -144,14 +148,29 @@ func (c Client) ResolvePath(path string) (string, error) {
 	if !strings.HasPrefix(path, "/") {
 		return "", errors.New("API path must start with /")
 	}
+	if parsed.Fragment != "" {
+		return "", errors.New("API path must not include a fragment")
+	}
+	if hasDotDotSegment(parsed.Path) {
+		return "", errors.New("API path must not include .. segments")
+	}
 	base, err := url.Parse(c.Config.APIBaseURL)
 	if err != nil {
 		return "", err
 	}
 	base.Path = strings.TrimRight(base.Path, "/") + "/" + strings.TrimLeft(parsed.Path, "/")
 	base.RawQuery = parsed.RawQuery
-	base.Fragment = parsed.Fragment
+	base.Fragment = ""
 	return base.String(), nil
+}
+
+func hasDotDotSegment(path string) bool {
+	for segment := range strings.SplitSeq(path, "/") {
+		if segment == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func readLimited(r io.Reader, limit int64) ([]byte, error) {

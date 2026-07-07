@@ -104,7 +104,7 @@ Apply the same pattern in Ruby or TypeScript: call `winthrop token` immediately 
 ```sh
 winthrop login    # start device authorization login
 winthrop token    # print a short-lived access token
-winthrop api      # make an authenticated GET request to the Winthrop API
+winthrop api PATH # make an authenticated GET request to the Winthrop API
 winthrop whoami   # print the current user from /api/v1/users/me
 winthrop logout   # delete the stored refresh token
 winthrop doctor   # check config, storage, reachability, and login state
