@@ -35,8 +35,9 @@ var (
 )
 
 type app struct {
-	httpClient *http.Client
-	store      store.Store
+	httpClient    *http.Client
+	store         store.Store
+	browserOpener func(string) error
 }
 
 type cachedAccessToken struct {
@@ -64,8 +65,9 @@ type accessTokenCacheStatus struct {
 
 func NewRootCommand() *cobra.Command {
 	return newRootCommand(app{
-		httpClient: &http.Client{Timeout: requestTimeout},
-		store:      store.NewKeyringStore(),
+		httpClient:    &http.Client{Timeout: requestTimeout},
+		store:         store.NewKeyringStore(),
+		browserOpener: openBrowser,
 	})
 }
 
@@ -112,7 +114,7 @@ func (a app) loginCommand() *cobra.Command {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Open this URL: %s\n", verificationURL)
 			fmt.Fprintf(cmd.OutOrStdout(), "Enter code: %s\n", device.UserCode)
-			if err := openBrowser(verificationURL); err == nil {
+			if a.browserOpener != nil && a.browserOpener(verificationURL) == nil {
 				fmt.Fprintln(cmd.OutOrStdout(), "Opened browser.")
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), "Waiting for authorization...")

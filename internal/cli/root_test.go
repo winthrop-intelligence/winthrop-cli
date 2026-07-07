@@ -107,6 +107,7 @@ func cachedTokenPayload(t *testing.T, accessToken string, expiresAt time.Time) s
 }
 
 func TestLoginStoresRefreshTokenAndActiveAccount(t *testing.T) {
+	var openedURL string
 	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/oauth/authorize_device":
@@ -154,7 +155,14 @@ func TestLoginStoresRefreshTokenAndActiveAccount(t *testing.T) {
 	t.Setenv(config.EnvClientID, "client")
 
 	fake := newFakeStore()
-	cmd := newRootCommand(app{httpClient: authServer.Client(), store: fake})
+	cmd := newRootCommand(app{
+		httpClient: authServer.Client(),
+		store:      fake,
+		browserOpener: func(rawURL string) error {
+			openedURL = rawURL
+			return nil
+		},
+	})
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
@@ -182,6 +190,50 @@ func TestLoginStoresRefreshTokenAndActiveAccount(t *testing.T) {
 	}
 	if stderr.String() != "" {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+	if openedURL != "https://verify.example.com?code=user-code" {
+		t.Fatalf("opened URL = %q", openedURL)
+	}
+}
+
+func TestLoginDoesNotOpenBrowserWhenOpenerIsUnset(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/authorize_device":
+			_ = json.NewEncoder(w).Encode(oauth.DeviceAuthorization{
+				DeviceCode:              "device",
+				UserCode:                "user-code",
+				VerificationURI:         "https://verify.example.com",
+				VerificationURIComplete: "https://verify.example.com?code=user-code",
+				ExpiresIn:               60,
+				Interval:                1,
+			})
+		case "/oauth/token":
+			_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "access-token", RefreshToken: "refresh-token"})
+		default:
+			t.Fatalf("auth path = %s", r.URL.Path)
+		}
+	}))
+	defer authServer.Close()
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "subject"})
+	}))
+	defer apiServer.Close()
+
+	t.Setenv(config.EnvAuthBaseURL, authServer.URL)
+	t.Setenv(config.EnvAPIBaseURL, apiServer.URL)
+	t.Setenv(config.EnvClientID, "client")
+
+	cmd := newRootCommand(app{httpClient: authServer.Client(), store: newFakeStore()})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"login"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), "Opened browser.") {
+		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
 
