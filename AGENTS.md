@@ -44,8 +44,12 @@ Name tests around behavior, for example `TestConfigLoadsEnvOverrides`. Store sta
 
 The current history only contains `Initial commit`, so no strict convention is established. Use concise, imperative messages such as `Add OAuth device flow command`.
 
+Commits must be signed with an accepted GitHub signing method, such as GPG or SSH. Never use `--no-gpg-sign` or otherwise bypass signing just because a private key, signing agent, or pinentry session is unavailable. If signing fails, stop and report the blocker, then retry after the user fixes the signing setup.
+
 Pull requests should include a short problem summary, implementation approach, test results, and any security or configuration impact. Link related issues when available. Include terminal output when CLI behavior changes.
 
 ## Security & Configuration Tips
+
+This is a public repository, so treat every committed byte as public and durable. Be extra careful with logs, examples, fixtures, generated files, and command output that might reveal private infrastructure, credentials, tokens, or customer data.
 
 Never commit client secrets, access tokens, refresh tokens, or `.env` files. Treat redirect URIs, scopes, and token storage paths as security-sensitive. Prefer environment variables or OS keychain integration over plaintext storage.

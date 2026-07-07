@@ -19,11 +19,13 @@ import (
 	"github.com/winthrop-intelligence/winthrop-cli/internal/config"
 	"github.com/winthrop-intelligence/winthrop-cli/internal/oauth"
 	"github.com/winthrop-intelligence/winthrop-cli/internal/store"
+	"github.com/winthrop-intelligence/winthrop-cli/internal/update"
 )
 
 const (
 	loginTimeout          = 15 * time.Minute
 	requestTimeout        = 30 * time.Second
+	updateNoticeTimeout   = 2 * time.Second
 	tokenRefreshWindow    = 60 * time.Second
 	accessTokenTimeFormat = time.RFC3339
 )
@@ -35,9 +37,12 @@ var (
 )
 
 type app struct {
-	httpClient    *http.Client
-	store         store.Store
-	browserOpener func(string) error
+	httpClient        *http.Client
+	store             store.Store
+	browserOpener     func(string) error
+	updateClient      update.Client
+	updateNoticeState update.NoticeState
+	updateNotices     bool
 }
 
 type cachedAccessToken struct {
@@ -64,10 +69,15 @@ type accessTokenCacheStatus struct {
 }
 
 func NewRootCommand() *cobra.Command {
+	httpClient := &http.Client{Timeout: requestTimeout}
 	return newRootCommand(app{
-		httpClient:    &http.Client{Timeout: requestTimeout},
+		httpClient:    httpClient,
 		store:         store.NewKeyringStore(),
 		browserOpener: openBrowser,
+		updateClient: update.Client{
+			HTTP: httpClient,
+		},
+		updateNotices: true,
 	})
 }
 
@@ -85,13 +95,14 @@ func newRootCommand(a app) *cobra.Command {
 		a.whoamiCommand(),
 		a.logoutCommand(),
 		a.doctorCommand(),
-		versionCommand(),
+		a.updateCommand(),
+		a.versionCommand(),
 	)
 	return cmd
 }
 
 func (a app) loginCommand() *cobra.Command {
-	return &cobra.Command{
+	return a.withUpdateNotice(&cobra.Command{
 		Use:   "login",
 		Short: "Log in with OAuth2 Device Authorization Grant",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -153,7 +164,7 @@ func (a app) loginCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "Logged in. Could not fetch current user: %v\n", identityErr)
 			return nil
 		},
-	}
+	})
 }
 
 func (a app) tokenCommand() *cobra.Command {
@@ -304,7 +315,7 @@ func (a app) logoutCommand() *cobra.Command {
 }
 
 func (a app) doctorCommand() *cobra.Command {
-	return &cobra.Command{
+	return a.withUpdateNotice(&cobra.Command{
 		Use:   "doctor",
 		Short: "Check Winthrop CLI configuration and login state",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -375,17 +386,123 @@ func (a app) doctorCommand() *cobra.Command {
 			}
 			return nil
 		},
-	}
+	})
 }
 
-func versionCommand() *cobra.Command {
-	return &cobra.Command{
+func (a app) updateCommand() *cobra.Command {
+	var checkOnly bool
+	var targetVersion string
+	var installDir string
+	cmd := &cobra.Command{
+		Use:   "update",
+		Short: "Update the Winthrop CLI",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := a.updateClient
+			if client.HTTP == nil {
+				client.HTTP = a.httpClient
+			}
+			if checkOnly {
+				status, err := updateStatus(cmd.Context(), client, version, targetVersion)
+				if err != nil {
+					return stderrError(cmd, err)
+				}
+				if status.UpdateAvailable {
+					fmt.Fprintf(cmd.OutOrStdout(), "update available: %s -> %s\n", status.CurrentVersion, status.LatestVersion)
+					fmt.Fprintln(cmd.OutOrStdout(), updateCommandSuggestion(targetVersion))
+					return nil
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "winthrop is up to date (%s)\n", status.CurrentVersion)
+				return nil
+			}
+			result, err := client.Install(cmd.Context(), update.InstallOptions{
+				CurrentVersion: version,
+				TargetVersion:  targetVersion,
+				InstallDir:     installDir,
+			})
+			if err != nil {
+				return stderrError(cmd, err)
+			}
+			if !result.Installed {
+				fmt.Fprintf(cmd.OutOrStdout(), "winthrop is up to date (%s)\n", result.CurrentVersion)
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "updated winthrop to %s at %s\n", result.LatestVersion, result.Path)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&checkOnly, "check", false, "check for an update without installing it")
+	cmd.Flags().StringVar(&targetVersion, "version", "", "install a specific release tag")
+	cmd.Flags().StringVar(&installDir, "install-dir", "", "install directory for the winthrop binary")
+	return cmd
+}
+
+func updateStatus(ctx context.Context, client update.Client, currentVersion string, targetVersion string) (update.Status, error) {
+	targetVersion = strings.TrimSpace(targetVersion)
+	if targetVersion != "" {
+		return update.Status{
+			CurrentVersion:  currentVersion,
+			LatestVersion:   targetVersion,
+			UpdateAvailable: update.CompareVersions(currentVersion, targetVersion) < 0,
+		}, nil
+	}
+	return client.Check(ctx, currentVersion)
+}
+
+func (a app) versionCommand() *cobra.Command {
+	return a.withUpdateNotice(&cobra.Command{
 		Use:   "version",
 		Short: "Print the Winthrop CLI version",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(cmd.OutOrStdout(), "winthrop %s\ncommit: %s\nbuilt: %s\n", version, commit, date)
 		},
+	})
+}
+
+func (a app) withUpdateNotice(cmd *cobra.Command) *cobra.Command {
+	preRun := cmd.PreRun
+	preRunE := cmd.PreRunE
+	if preRunE != nil {
+		cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+			a.maybePrintUpdateNotice(cmd)
+			return preRunE(cmd, args)
+		}
+		return cmd
 	}
+	cmd.PreRun = func(cmd *cobra.Command, args []string) {
+		a.maybePrintUpdateNotice(cmd)
+		if preRun != nil {
+			preRun(cmd, args)
+		}
+	}
+	return cmd
+}
+
+func (a app) maybePrintUpdateNotice(cmd *cobra.Command) {
+	if !a.updateNotices {
+		return
+	}
+	if err := config.LoadEnvFile(); err != nil {
+		return
+	}
+	client := a.updateClient
+	if client.HTTP == nil {
+		client.HTTP = a.httpClient
+	}
+	ctx, cancel := context.WithTimeout(cmd.Context(), updateNoticeTimeout)
+	defer cancel()
+	status, ok := update.Notice(ctx, client, a.updateNoticeState, version)
+	if !ok {
+		return
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "notice: winthrop %s is available; run `winthrop update` to install it\n", status.LatestVersion)
+}
+
+func updateCommandSuggestion(targetVersion string) string {
+	targetVersion = strings.TrimSpace(targetVersion)
+	if targetVersion == "" {
+		return "run: winthrop update"
+	}
+	return fmt.Sprintf("run: winthrop update --version %s", targetVersion)
 }
 
 func (a app) refreshAccessToken(ctx context.Context, cfg config.Config) (oauth.TokenResponse, error) {

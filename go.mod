@@ -6,6 +6,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.2
 	github.com/zalando/go-keyring v0.2.8
+	golang.org/x/mod v0.37.0
 )
 
 require (

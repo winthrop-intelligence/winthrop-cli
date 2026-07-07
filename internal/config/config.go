@@ -30,10 +30,17 @@ type Config struct {
 }
 
 func Load() (Config, error) {
-	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return Config{}, fmt.Errorf("load .env: %w", err)
+	if err := LoadEnvFile(); err != nil {
+		return Config{}, err
 	}
 	return LoadFromLookup(os.LookupEnv)
+}
+
+func LoadEnvFile() error {
+	if err := godotenv.Load(); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("load .env: %w", err)
+	}
+	return nil
 }
 
 func LoadFromLookup(lookup func(string) (string, bool)) (Config, error) {
