@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/winthrop-intelligence/winthrop-cli/internal/config"
 	"github.com/winthrop-intelligence/winthrop-cli/internal/oauth"
 	"github.com/winthrop-intelligence/winthrop-cli/internal/store"
+	"github.com/winthrop-intelligence/winthrop-cli/internal/update"
 )
 
 type fakeStore struct {
@@ -984,5 +987,184 @@ func TestVersionCommandPrintsBuildMetadata(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
+	}
+}
+
+func TestUpdateCheckReportsAvailableUpdate(t *testing.T) {
+	oldVersion := version
+	t.Cleanup(func() {
+		version = oldVersion
+	})
+	version = "v1.2.2"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/winthrop-intelligence/winthrop-cli/releases/latest" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"tag_name":"v1.2.3"}`))
+	}))
+	defer server.Close()
+
+	cmd := newRootCommand(app{
+		httpClient: http.DefaultClient,
+		store:      newFakeStore(),
+		updateClient: update.Client{
+			HTTP:       server.Client(),
+			APIBaseURL: server.URL,
+		},
+	})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"update", "--check"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := stdout.String()
+	for _, want := range []string{"update available: v1.2.2 -> v1.2.3", "run: winthrop update"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestUpdateCheckWithTargetVersionDoesNotCallNetwork(t *testing.T) {
+	oldVersion := version
+	t.Cleanup(func() {
+		version = oldVersion
+	})
+	version = "v1.2.2"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected network request to %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	cmd := newRootCommand(app{
+		httpClient: http.DefaultClient,
+		store:      newFakeStore(),
+		updateClient: update.Client{
+			HTTP:       server.Client(),
+			APIBaseURL: server.URL,
+		},
+	})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"update", "--check", "--version", "v1.2.3"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "update available: v1.2.2 -> v1.2.3") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestVersionCommandPrintsPassiveUpdateNotice(t *testing.T) {
+	t.Chdir(t.TempDir())
+	oldVersion := version
+	t.Cleanup(func() {
+		version = oldVersion
+	})
+	version = "v1.2.2"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name":"v1.2.3"}`))
+	}))
+	defer server.Close()
+
+	cmd := newRootCommand(app{
+		httpClient: http.DefaultClient,
+		store:      newFakeStore(),
+		updateClient: update.Client{
+			HTTP:       server.Client(),
+			APIBaseURL: server.URL,
+		},
+		updateNoticeState: update.NoticeState{Path: filepath.Join(t.TempDir(), "update.json")},
+		updateNotices:     true,
+	})
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "winthrop v1.2.2") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "notice: winthrop v1.2.3 is available") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestVersionCommandHonorsDotenvUpdateNoticeOptOut(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Chdir(tempDir)
+	if err := os.WriteFile(filepath.Join(tempDir, ".env"), []byte(update.EnvUpdateCheck+"=0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	oldValue, hadValue := os.LookupEnv(update.EnvUpdateCheck)
+	if err := os.Unsetenv(update.EnvUpdateCheck); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if hadValue {
+			_ = os.Setenv(update.EnvUpdateCheck, oldValue)
+		} else {
+			_ = os.Unsetenv(update.EnvUpdateCheck)
+		}
+	})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected update notice request to %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	cmd := newRootCommand(app{
+		httpClient: http.DefaultClient,
+		store:      newFakeStore(),
+		updateClient: update.Client{
+			HTTP:       server.Client(),
+			APIBaseURL: server.URL,
+		},
+		updateNoticeState: update.NoticeState{Path: filepath.Join(t.TempDir(), "update.json")},
+		updateNotices:     true,
+	})
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"version"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTokenCommandDoesNotCheckForPassiveUpdateNotice(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected update notice request to %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	t.Setenv(config.EnvAuthBaseURL, "https://auth.example.com")
+	t.Setenv(config.EnvAPIBaseURL, "https://api.example.com")
+	t.Setenv(config.EnvClientID, "client")
+
+	cmd := newRootCommand(app{
+		httpClient: http.DefaultClient,
+		store:      newFakeStore(),
+		updateClient: update.Client{
+			HTTP:       server.Client(),
+			APIBaseURL: server.URL,
+		},
+		updateNoticeState: update.NoticeState{Path: filepath.Join(t.TempDir(), "update.json")},
+		updateNotices:     true,
+	})
+	cmd.SetArgs([]string{"token"})
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not logged in") {
+		t.Fatalf("error = %v", err)
 	}
 }

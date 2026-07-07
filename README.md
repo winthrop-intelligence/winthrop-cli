@@ -24,6 +24,18 @@ Check the installed version:
 winthrop version
 ```
 
+Update an existing install:
+
+```sh
+winthrop update
+```
+
+To check without installing:
+
+```sh
+winthrop update --check
+```
+
 ## Configuration
 
 Production auth, API, client ID, and scopes are built into the released CLI. Most users do not need to configure anything before running:
@@ -39,9 +51,11 @@ For local development or support overrides, set any of these environment variabl
 # export WINTHROP_API_BASE_URL="https://api.winad-hq.com"
 # export WINTHROP_CLIENT_ID="your-client-id"
 # export WINTHROP_SCOPES="winad_read offline_access"
+# export WINTHROP_UPDATE_CHECK="0"
 ```
 
 `WINTHROP_SCOPES` accepts space-separated OAuth scopes.
+Set `WINTHROP_UPDATE_CHECK=0` to disable passive update notices.
 
 For local development, you can put the same keys in a `.env` file in the working directory. Real environment variables take precedence over values from `.env`.
 
@@ -108,6 +122,7 @@ winthrop api PATH # make an authenticated GET request to the Winthrop API
 winthrop whoami   # print the current user from /api/v1/users/me
 winthrop logout   # delete the stored refresh token
 winthrop doctor   # check config, storage, reachability, and login state
+winthrop update   # update the CLI from the latest GitHub release
 winthrop version  # print version and build metadata
 ```
 
