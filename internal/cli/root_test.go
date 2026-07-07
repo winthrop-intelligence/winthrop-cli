@@ -1066,6 +1066,40 @@ func TestUpdateCheckWithTargetVersionDoesNotCallNetwork(t *testing.T) {
 	}
 }
 
+func TestUpdateCheckTrimsWhitespaceOnlyTargetVersion(t *testing.T) {
+	oldVersion := version
+	t.Cleanup(func() {
+		version = oldVersion
+	})
+	version = "v1.2.3"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/winthrop-intelligence/winthrop-cli/releases/latest" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"tag_name":"v1.2.3"}`))
+	}))
+	defer server.Close()
+
+	cmd := newRootCommand(app{
+		httpClient: http.DefaultClient,
+		store:      newFakeStore(),
+		updateClient: update.Client{
+			HTTP:       server.Client(),
+			APIBaseURL: server.URL,
+		},
+	})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"update", "--check", "--version", "  "})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "winthrop is up to date (v1.2.3)") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
 func TestWithUpdateNoticePreservesExistingPreRun(t *testing.T) {
 	called := false
 	cmd := (app{}).withUpdateNotice(&cobra.Command{

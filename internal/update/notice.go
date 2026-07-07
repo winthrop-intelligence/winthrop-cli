@@ -94,7 +94,9 @@ func Notice(ctx context.Context, client Client, state NoticeState, currentVersio
 	if err != nil {
 		return Status{}, false
 	}
-	_ = state.MarkChecked()
+	if err := state.MarkChecked(); err != nil {
+		return Status{}, false
+	}
 	if !status.UpdateAvailable {
 		return Status{}, false
 	}

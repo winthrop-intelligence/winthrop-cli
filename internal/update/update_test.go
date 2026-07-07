@@ -317,6 +317,23 @@ func TestNoticeMarksCacheOnlyAfterSuccessfulCheck(t *testing.T) {
 	}
 }
 
+func TestNoticeSuppressesNoticeWhenCacheWriteFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name":"v1.2.3"}`))
+	}))
+	defer server.Close()
+
+	client := Client{HTTP: server.Client(), APIBaseURL: server.URL}
+	state := NoticeState{Path: filepath.Join(t.TempDir(), "missing", "update.json")}
+	blockingFile := filepath.Dir(state.Path)
+	if err := os.WriteFile(blockingFile, []byte("not a directory"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := Notice(context.Background(), client, state, "v1.2.2"); ok {
+		t.Fatal("notice should be suppressed when cache write fails")
+	}
+}
+
 func releaseServer(t *testing.T, artifact string, archive []byte) *httptest.Server {
 	t.Helper()
 	sum := sha256.Sum256(archive)

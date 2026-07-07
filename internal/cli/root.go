@@ -437,6 +437,7 @@ func (a app) updateCommand() *cobra.Command {
 }
 
 func updateStatus(ctx context.Context, client update.Client, currentVersion string, targetVersion string) (update.Status, error) {
+	targetVersion = strings.TrimSpace(targetVersion)
 	if targetVersion != "" {
 		return update.Status{
 			CurrentVersion:  currentVersion,
