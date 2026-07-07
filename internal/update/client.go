@@ -64,6 +64,7 @@ func (c Client) LatestVersion(ctx context.Context) (string, error) {
 
 func (c Client) Install(ctx context.Context, opts InstallOptions) (InstallResult, error) {
 	targetVersion := strings.TrimSpace(opts.TargetVersion)
+	specificVersion := targetVersion != ""
 	if targetVersion == "" {
 		var err error
 		targetVersion, err = c.LatestVersion(ctx)
@@ -76,7 +77,7 @@ func (c Client) Install(ctx context.Context, opts InstallOptions) (InstallResult
 		LatestVersion:   targetVersion,
 		UpdateAvailable: CompareVersions(opts.CurrentVersion, targetVersion) < 0,
 	}
-	if opts.TargetVersion == "" && !status.UpdateAvailable {
+	if !specificVersion && !status.UpdateAvailable {
 		return InstallResult{Status: status}, nil
 	}
 

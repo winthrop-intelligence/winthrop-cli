@@ -408,7 +408,7 @@ func (a app) updateCommand() *cobra.Command {
 				}
 				if status.UpdateAvailable {
 					fmt.Fprintf(cmd.OutOrStdout(), "update available: %s -> %s\n", status.CurrentVersion, status.LatestVersion)
-					fmt.Fprintln(cmd.OutOrStdout(), "run: winthrop update")
+					fmt.Fprintln(cmd.OutOrStdout(), updateCommandSuggestion(targetVersion))
 					return nil
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "winthrop is up to date (%s)\n", status.CurrentVersion)
@@ -458,8 +458,20 @@ func (a app) versionCommand() *cobra.Command {
 }
 
 func (a app) withUpdateNotice(cmd *cobra.Command) *cobra.Command {
+	preRun := cmd.PreRun
+	preRunE := cmd.PreRunE
+	if preRunE != nil {
+		cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+			a.maybePrintUpdateNotice(cmd)
+			return preRunE(cmd, args)
+		}
+		return cmd
+	}
 	cmd.PreRun = func(cmd *cobra.Command, args []string) {
 		a.maybePrintUpdateNotice(cmd)
+		if preRun != nil {
+			preRun(cmd, args)
+		}
 	}
 	return cmd
 }
@@ -482,6 +494,14 @@ func (a app) maybePrintUpdateNotice(cmd *cobra.Command) {
 		return
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "notice: winthrop %s is available; run `winthrop update` to install it\n", status.LatestVersion)
+}
+
+func updateCommandSuggestion(targetVersion string) string {
+	targetVersion = strings.TrimSpace(targetVersion)
+	if targetVersion == "" {
+		return "run: winthrop update"
+	}
+	return fmt.Sprintf("run: winthrop update --version %s", targetVersion)
 }
 
 func (a app) refreshAccessToken(ctx context.Context, cfg config.Config) (oauth.TokenResponse, error) {

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/zalando/go-keyring"
 
 	"github.com/winthrop-intelligence/winthrop-cli/internal/config"
@@ -1056,6 +1057,49 @@ func TestUpdateCheckWithTargetVersionDoesNotCallNetwork(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "update available: v1.2.2 -> v1.2.3") {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "run: winthrop update --version v1.2.3") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "run: winthrop update\n") {
+		t.Fatalf("stdout used latest-release suggestion: %q", stdout.String())
+	}
+}
+
+func TestWithUpdateNoticePreservesExistingPreRun(t *testing.T) {
+	called := false
+	cmd := (app{}).withUpdateNotice(&cobra.Command{
+		Use: "wrapped",
+		PreRun: func(cmd *cobra.Command, args []string) {
+			called = true
+		},
+		Run: func(cmd *cobra.Command, args []string) {},
+	})
+	cmd.SetArgs([]string{})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("wrapped PreRun was not called")
+	}
+}
+
+func TestWithUpdateNoticePreservesExistingPreRunE(t *testing.T) {
+	called := false
+	cmd := (app{}).withUpdateNotice(&cobra.Command{
+		Use: "wrapped",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			called = true
+			return nil
+		},
+		Run: func(cmd *cobra.Command, args []string) {},
+	})
+	cmd.SetArgs([]string{})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("wrapped PreRunE was not called")
 	}
 }
 

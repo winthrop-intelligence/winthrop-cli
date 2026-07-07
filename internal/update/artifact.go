@@ -123,8 +123,11 @@ func extractZipBinary(archivePath string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		defer in.Close()
-		return writeTempBinary(in)
+		tmp, err := writeTempBinary(in)
+		if closeErr := in.Close(); err == nil {
+			err = closeErr
+		}
+		return tmp, err
 	}
 	return "", errors.New("archive did not contain winthrop.exe binary")
 }

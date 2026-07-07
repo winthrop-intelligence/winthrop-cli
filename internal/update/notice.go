@@ -3,6 +3,7 @@ package update
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,8 +29,11 @@ func (s NoticeState) ShouldCheck() bool {
 		return false
 	}
 	raw, err := os.ReadFile(path)
-	if err != nil {
+	if errors.Is(err, os.ErrNotExist) {
 		return true
+	}
+	if err != nil {
+		return false
 	}
 	var cache noticeCache
 	if err := json.Unmarshal(raw, &cache); err != nil {
@@ -86,9 +90,12 @@ func Notice(ctx context.Context, client Client, state NoticeState, currentVersio
 	if !state.ShouldCheck() {
 		return Status{}, false
 	}
-	_ = state.MarkChecked()
 	status, err := client.Check(ctx, currentVersion)
-	if err != nil || !status.UpdateAvailable {
+	if err != nil {
+		return Status{}, false
+	}
+	_ = state.MarkChecked()
+	if !status.UpdateAvailable {
 		return Status{}, false
 	}
 	return status, true

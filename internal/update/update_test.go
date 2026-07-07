@@ -127,6 +127,36 @@ func TestInstallDownloadsVerifiesAndInstallsTarArtifact(t *testing.T) {
 	}
 }
 
+func TestInstallWhitespaceTargetVersionDoesNotForceReinstallWhenUpToDate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/releases/latest"):
+			_, _ = w.Write([]byte(`{"tag_name":"v1.2.3"}`))
+		default:
+			t.Fatalf("unexpected request to %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	result, err := (Client{
+		HTTP:            server.Client(),
+		APIBaseURL:      server.URL,
+		DownloadBaseURL: server.URL,
+		GOOS:            "linux",
+		GOARCH:          "amd64",
+	}).Install(context.Background(), InstallOptions{
+		CurrentVersion: "v1.2.3",
+		TargetVersion:  "  ",
+		InstallDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Installed {
+		t.Fatalf("result = %+v, want no install", result)
+	}
+}
+
 func TestInstallReplacesExecutablePathWhenContainingDirectoryIsWritable(t *testing.T) {
 	artifact, err := ArtifactName("v1.2.3", "linux", "amd64")
 	if err != nil {
@@ -251,6 +281,39 @@ func TestNoticeRespectsCacheAndOptOut(t *testing.T) {
 	stale := NoticeState{Path: cachePath, Now: func() time.Time { return now.Add(48 * time.Hour) }}
 	if stale.ShouldCheck() {
 		t.Fatal("opt-out should suppress notice checks")
+	}
+}
+
+func TestNoticeCacheFailsClosedWhenUnreadable(t *testing.T) {
+	state := NoticeState{Path: t.TempDir()}
+	if state.ShouldCheck() {
+		t.Fatal("unreadable cache path should suppress checks")
+	}
+}
+
+func TestNoticeMarksCacheOnlyAfterSuccessfulCheck(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "update.json")
+	failClient := Client{
+		HTTP:       http.DefaultClient,
+		APIBaseURL: "http://127.0.0.1:1",
+	}
+	if _, ok := Notice(context.Background(), failClient, NoticeState{Path: cachePath}, "v1.2.2"); ok {
+		t.Fatal("failed network check reported a notice")
+	}
+	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+		t.Fatalf("cache file after failed check err = %v, want not exist", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name":"v1.2.2"}`))
+	}))
+	defer server.Close()
+	successClient := Client{HTTP: server.Client(), APIBaseURL: server.URL}
+	if _, ok := Notice(context.Background(), successClient, NoticeState{Path: cachePath}, "v1.2.2"); ok {
+		t.Fatal("up-to-date check reported a notice")
+	}
+	if _, err := os.Stat(cachePath); err != nil {
+		t.Fatalf("cache file after successful check err = %v", err)
 	}
 }
 
