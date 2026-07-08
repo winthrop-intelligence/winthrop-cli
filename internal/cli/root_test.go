@@ -1085,7 +1085,8 @@ func TestNoArgCommandCompletionDisablesFileCompletion(t *testing.T) {
 			if err := cmd.ExecuteContext(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if !strings.HasSuffix(stdout.String(), ":4\n") {
+			want := fmt.Sprintf(":%d\n", cobra.ShellCompDirectiveNoFileComp)
+			if !strings.HasSuffix(stdout.String(), want) {
 				t.Fatalf("completion output = %q, want NoFileComp directive", stdout.String())
 			}
 			if strings.Contains(stderr.String(), "notice:") {
