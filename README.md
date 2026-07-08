@@ -113,6 +113,46 @@ client = GeneratedClient(
 
 Apply the same pattern in Ruby or TypeScript: call `winthrop token` immediately before requests that need an `Authorization: Bearer ...` header.
 
+## Shell Completion
+
+Generate shell completion scripts with:
+
+```sh
+winthrop completion bash
+winthrop completion zsh
+winthrop completion fish
+winthrop completion powershell
+```
+
+For the current shell session:
+
+```sh
+source <(winthrop completion bash)
+source <(winthrop completion zsh)
+winthrop completion fish | source
+winthrop completion powershell | Out-String | Invoke-Expression
+```
+
+For persistent setup, install the generated script where your shell loads completions. Common examples:
+
+```sh
+# bash
+mkdir -p ~/.local/share/bash-completion/completions
+winthrop completion bash > ~/.local/share/bash-completion/completions/winthrop
+
+# zsh
+mkdir -p ~/.local/share/zsh/site-functions
+winthrop completion zsh > ~/.local/share/zsh/site-functions/_winthrop
+echo 'fpath=(~/.local/share/zsh/site-functions $fpath)' >> ~/.zshrc
+echo 'autoload -Uz compinit; compinit' >> ~/.zshrc
+
+# fish
+mkdir -p ~/.config/fish/completions
+winthrop completion fish > ~/.config/fish/completions/winthrop.fish
+```
+
+For PowerShell, add the output of `winthrop completion powershell` to your profile. Run `winthrop completion <shell> --help` for shell-specific instructions.
+
 ## Commands
 
 ```sh
@@ -124,6 +164,7 @@ winthrop logout   # delete the stored refresh token
 winthrop doctor   # check config, storage, reachability, and login state
 winthrop update   # update the CLI from the latest GitHub release
 winthrop version  # print version and build metadata
+winthrop completion SHELL # generate shell completion scripts
 ```
 
 ## Troubleshooting

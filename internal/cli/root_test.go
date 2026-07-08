@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -988,6 +989,111 @@ func TestVersionCommandPrintsBuildMetadata(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
+	}
+}
+
+func TestCompletionCommandIsDocumentedInHelp(t *testing.T) {
+	cmd := newRootCommand(app{httpClient: http.DefaultClient, store: newFakeStore()})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := stdout.String()
+	for _, want := range []string{"completion", "Generate the autocompletion script"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestCompletionHelpListsSupportedShells(t *testing.T) {
+	cmd := newRootCommand(app{httpClient: http.DefaultClient, store: newFakeStore()})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"completion", "--help"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := stdout.String()
+	for _, want := range []string{"bash", "zsh", "fish", "powershell"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stdout = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestCompletionGeneratorsDoNotNeedRuntimeState(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		t.Run(shell, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Fatalf("unexpected update notice request to %s", r.URL.Path)
+			}))
+			defer server.Close()
+
+			cmd := newRootCommand(app{
+				httpClient: http.DefaultClient,
+				store:      newFakeStore(),
+				updateClient: update.Client{
+					HTTP:       server.Client(),
+					APIBaseURL: server.URL,
+				},
+				updateNoticeState: update.NoticeState{Path: filepath.Join(t.TempDir(), "update.json")},
+				updateNotices:     true,
+			})
+			var stdout, stderr bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+			cmd.SetArgs([]string{"completion", shell})
+			if err := cmd.ExecuteContext(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if stdout.Len() == 0 {
+				t.Fatal("completion output was empty")
+			}
+			if strings.Contains(stderr.String(), "notice:") {
+				t.Fatalf("stderr included update notice: %q", stderr.String())
+			}
+		})
+	}
+}
+
+func TestNoArgCommandCompletionDisablesFileCompletion(t *testing.T) {
+	for _, command := range []string{"login", "token", "whoami", "logout", "doctor", "update", "version"} {
+		t.Run(command, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Fatalf("unexpected update notice request to %s", r.URL.Path)
+			}))
+			defer server.Close()
+
+			cmd := newRootCommand(app{
+				httpClient: http.DefaultClient,
+				store:      newFakeStore(),
+				updateClient: update.Client{
+					HTTP:       server.Client(),
+					APIBaseURL: server.URL,
+				},
+				updateNoticeState: update.NoticeState{Path: filepath.Join(t.TempDir(), "update.json")},
+				updateNotices:     true,
+			})
+			var stdout, stderr bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+			cmd.SetArgs([]string{"__complete", command, ""})
+			if err := cmd.ExecuteContext(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			want := fmt.Sprintf(":%d\n", cobra.ShellCompDirectiveNoFileComp)
+			if !strings.HasSuffix(stdout.String(), want) {
+				t.Fatalf("completion output = %q, want NoFileComp directive", stdout.String())
+			}
+			if strings.Contains(stderr.String(), "notice:") {
+				t.Fatalf("stderr included update notice: %q", stderr.String())
+			}
+		})
 	}
 }
 

@@ -102,7 +102,7 @@ func newRootCommand(a app) *cobra.Command {
 }
 
 func (a app) loginCommand() *cobra.Command {
-	return a.withUpdateNotice(&cobra.Command{
+	return a.withUpdateNotice(noFileCompletionCommand(&cobra.Command{
 		Use:   "login",
 		Short: "Log in with OAuth2 Device Authorization Grant",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -164,11 +164,11 @@ func (a app) loginCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "Logged in. Could not fetch current user: %v\n", identityErr)
 			return nil
 		},
-	})
+	}))
 }
 
 func (a app) tokenCommand() *cobra.Command {
-	return &cobra.Command{
+	return noFileCompletionCommand(&cobra.Command{
 		Use:   "token",
 		Short: "Print a short-lived access token",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -183,7 +183,7 @@ func (a app) tokenCommand() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), token.AccessToken)
 			return nil
 		},
-	}
+	})
 }
 
 func (a app) apiCommand() *cobra.Command {
@@ -261,7 +261,7 @@ func streamingHTTPClient(client *http.Client) *http.Client {
 }
 
 func (a app) whoamiCommand() *cobra.Command {
-	return &cobra.Command{
+	return noFileCompletionCommand(&cobra.Command{
 		Use:   "whoami",
 		Short: "Print the current Winthrop user",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -280,11 +280,11 @@ func (a app) whoamiCommand() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), api.Summary(identity))
 			return nil
 		},
-	}
+	})
 }
 
 func (a app) logoutCommand() *cobra.Command {
-	return &cobra.Command{
+	return noFileCompletionCommand(&cobra.Command{
 		Use:   "logout",
 		Short: "Delete the stored Winthrop login",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -311,11 +311,11 @@ func (a app) logoutCommand() *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), "Logged out.")
 			return nil
 		},
-	}
+	})
 }
 
 func (a app) doctorCommand() *cobra.Command {
-	return a.withUpdateNotice(&cobra.Command{
+	return a.withUpdateNotice(noFileCompletionCommand(&cobra.Command{
 		Use:   "doctor",
 		Short: "Check Winthrop CLI configuration and login state",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -386,14 +386,14 @@ func (a app) doctorCommand() *cobra.Command {
 			}
 			return nil
 		},
-	})
+	}))
 }
 
 func (a app) updateCommand() *cobra.Command {
 	var checkOnly bool
 	var targetVersion string
 	var installDir string
-	cmd := &cobra.Command{
+	cmd := noFileCompletionCommand(&cobra.Command{
 		Use:   "update",
 		Short: "Update the Winthrop CLI",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -429,7 +429,7 @@ func (a app) updateCommand() *cobra.Command {
 			fmt.Fprintf(cmd.OutOrStdout(), "updated winthrop to %s at %s\n", result.LatestVersion, result.Path)
 			return nil
 		},
-	}
+	})
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "check for an update without installing it")
 	cmd.Flags().StringVar(&targetVersion, "version", "", "install a specific release tag")
 	cmd.Flags().StringVar(&installDir, "install-dir", "", "install directory for the winthrop binary")
@@ -449,13 +449,20 @@ func updateStatus(ctx context.Context, client update.Client, currentVersion stri
 }
 
 func (a app) versionCommand() *cobra.Command {
-	return a.withUpdateNotice(&cobra.Command{
+	return a.withUpdateNotice(noFileCompletionCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print the Winthrop CLI version",
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Fprintf(cmd.OutOrStdout(), "winthrop %s\ncommit: %s\nbuilt: %s\n", version, commit, date)
 		},
-	})
+	}))
+}
+
+func noFileCompletionCommand(cmd *cobra.Command) *cobra.Command {
+	cmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return cmd
 }
 
 func (a app) withUpdateNotice(cmd *cobra.Command) *cobra.Command {
