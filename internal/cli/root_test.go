@@ -30,6 +30,12 @@ type fakeStore struct {
 	accessTokenErr   error
 }
 
+type errorWriter struct{}
+
+func (errorWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
 func newFakeStore() *fakeStore {
 	return &fakeStore{values: map[string]string{}}
 }
@@ -109,6 +115,55 @@ func cachedTokenPayload(t *testing.T, accessToken string, expiresAt time.Time) s
 		t.Fatal(err)
 	}
 	return string(payload)
+}
+
+func hasDoctorCheck(checks []doctorCheck, name string, status string) bool {
+	for _, check := range checks {
+		if check.Name == name && check.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeJSONObject(t *testing.T, payload []byte) map[string]any {
+	t.Helper()
+	var got map[string]any
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("decode stdout: %v\n%s", err, string(payload))
+	}
+	return got
+}
+
+func hasJSONDoctorCheck(checks []any, name string, status string) bool {
+	check := findJSONDoctorCheck(checks, name)
+	return check != nil && check["status"] == status
+}
+
+func findJSONDoctorCheck(checks []any, name string) map[string]any {
+	for _, raw := range checks {
+		check, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if check["name"] == name {
+			return check
+		}
+	}
+	return nil
+}
+
+func jsonStringSlice(t *testing.T, values []any) []string {
+	t.Helper()
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		text, ok := value.(string)
+		if !ok {
+			t.Fatalf("value = %#v, want string", value)
+		}
+		result = append(result, text)
+	}
+	return result
 }
 
 func TestLoginStoresRefreshTokenAndActiveAccount(t *testing.T) {
@@ -630,6 +685,64 @@ func TestWhoamiRefreshesTokenAndPrintsIdentity(t *testing.T) {
 	}
 }
 
+func TestWhoamiJSONPrintsIdentity(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/token" {
+			t.Fatalf("auth path = %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "access-token"})
+	}))
+	defer authServer.Close()
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/users/me" {
+			t.Fatalf("api path = %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "subject", "email": "user@example.com"})
+	}))
+	defer apiServer.Close()
+
+	t.Setenv(config.EnvAuthBaseURL, authServer.URL)
+	t.Setenv(config.EnvAPIBaseURL, apiServer.URL)
+	t.Setenv(config.EnvClientID, "client")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeStore()
+	account := store.RefreshAccount(cfg, "subject")
+	if err := fake.SaveRefreshToken(account, "refresh-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.SetActiveAccount(store.ActiveKey(cfg), account); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newRootCommand(app{httpClient: authServer.Client(), store: fake})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"whoami", "--json"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decodeJSONObject(t, stdout.Bytes())
+	if got["subject"] != "subject" {
+		t.Fatalf("subject = %q", got["subject"])
+	}
+	identity, ok := got["identity"].(map[string]any)
+	if !ok {
+		t.Fatalf("identity = %#v", got["identity"])
+	}
+	if identity["email"] != "user@example.com" {
+		t.Fatalf("identity = %#v", identity)
+	}
+	if summary, ok := got["summary"].(string); !ok || !strings.Contains(summary, "email=user@example.com") {
+		t.Fatalf("summary = %#v", got["summary"])
+	}
+}
+
 func TestLogoutDeletesStoredLogin(t *testing.T) {
 	t.Setenv(config.EnvAuthBaseURL, "https://auth.example.com")
 	t.Setenv(config.EnvAPIBaseURL, "https://api.example.com")
@@ -864,6 +977,115 @@ func TestDoctorDoesNotReportMissingConfigWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestDoctorJSONReportsFailures(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer apiServer.Close()
+
+	t.Setenv(config.EnvAuthBaseURL, authServer.URL)
+	t.Setenv(config.EnvAPIBaseURL, apiServer.URL)
+	t.Setenv(config.EnvClientID, "client")
+
+	cmd := newRootCommand(app{httpClient: authServer.Client(), store: newFakeStore()})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"doctor", "--json"})
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("expected login failure")
+	}
+
+	got := decodeJSONObject(t, stdout.Bytes())
+	if got["ok"] != false {
+		t.Fatalf("OK = true, want false")
+	}
+	checks, ok := got["checks"].([]any)
+	if !ok {
+		t.Fatalf("checks = %#v", got["checks"])
+	}
+	if !hasJSONDoctorCheck(checks, "config", "ok") {
+		t.Fatalf("checks = %#v, want config ok", checks)
+	}
+	if !hasJSONDoctorCheck(checks, "login", "fail") {
+		t.Fatalf("checks = %#v, want login failure", checks)
+	}
+	if strings.Contains(stdout.String(), "refresh-token") || strings.Contains(stdout.String(), "access-token") {
+		t.Fatalf("stdout leaked token: %q", stdout.String())
+	}
+}
+
+func TestDoctorJSONReportsAccessTokenCacheState(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+			w.WriteHeader(http.StatusOK)
+		case http.MethodPost:
+			_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "fresh-access", ExpiresIn: 3600})
+		default:
+			t.Fatalf("auth method = %s", r.Method)
+		}
+	}))
+	defer authServer.Close()
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			t.Fatalf("api method = %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer apiServer.Close()
+
+	t.Setenv(config.EnvAuthBaseURL, authServer.URL)
+	t.Setenv(config.EnvAPIBaseURL, apiServer.URL)
+	t.Setenv(config.EnvClientID, "client")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeStore()
+	account := store.RefreshAccount(cfg, "subject")
+	if err := fake.SaveRefreshToken(account, "refresh-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.SetActiveAccount(store.ActiveKey(cfg), account); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.SaveAccessToken(account, cachedTokenPayload(t, "cached-access", time.Now().Add(-time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newRootCommand(app{httpClient: authServer.Client(), store: fake})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"doctor", "--json"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decodeJSONObject(t, stdout.Bytes())
+	checks, ok := got["checks"].([]any)
+	if !ok {
+		t.Fatalf("checks = %#v", got["checks"])
+	}
+	cacheCheck := findJSONDoctorCheck(checks, "access_token_cache")
+	if cacheCheck == nil {
+		t.Fatalf("checks = %#v, want access token cache check", checks)
+	}
+	if cacheCheck["status"] != "expired" {
+		t.Fatalf("cache status = %#v", cacheCheck["status"])
+	}
+	if strings.Contains(stdout.String(), "cached-access") || strings.Contains(stdout.String(), "fresh-access") {
+		t.Fatalf("stdout leaked token: %q", stdout.String())
+	}
+}
+
 func TestDoctorReportsAccessTokenCacheStatus(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -989,6 +1211,40 @@ func TestVersionCommandPrintsBuildMetadata(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
+	}
+}
+
+func TestVersionCommandPrintsJSON(t *testing.T) {
+	oldVersion, oldCommit, oldDate := version, commit, date
+	t.Cleanup(func() {
+		version, commit, date = oldVersion, oldCommit, oldDate
+	})
+	version, commit, date = "v1.2.3", "abc123", "2026-06-03T00:00:00Z"
+
+	cmd := newRootCommand(app{httpClient: http.DefaultClient, store: newFakeStore()})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"version", "--json"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decodeJSONObject(t, stdout.Bytes())
+	if got["version"] != "v1.2.3" || got["commit"] != "abc123" || got["built"] != "2026-06-03T00:00:00Z" {
+		t.Fatalf("version output = %#v", got)
+	}
+}
+
+func TestVersionJSONReportsWriteError(t *testing.T) {
+	cmd := newRootCommand(app{httpClient: http.DefaultClient, store: newFakeStore()})
+	cmd.SetOut(errorWriter{})
+	cmd.SetArgs([]string{"version", "--json"})
+	err := cmd.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatal("ExecuteContext error = nil")
+	}
+	if !strings.Contains(err.Error(), "write failed") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -1132,6 +1388,86 @@ func TestUpdateCheckReportsAvailableUpdate(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("stdout = %q, want %q", got, want)
 		}
+	}
+}
+
+func TestUpdateCheckPrintsJSON(t *testing.T) {
+	oldVersion := version
+	t.Cleanup(func() {
+		version = oldVersion
+	})
+	version = "v1.2.2"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/winthrop-intelligence/winthrop-cli/releases/latest" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"tag_name":"v1.2.3"}`))
+	}))
+	defer server.Close()
+
+	cmd := newRootCommand(app{
+		httpClient: http.DefaultClient,
+		store:      newFakeStore(),
+		updateClient: update.Client{
+			HTTP:       server.Client(),
+			APIBaseURL: server.URL,
+		},
+	})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"update", "--check", "--json"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decodeJSONObject(t, stdout.Bytes())
+	if got["current_version"] != "v1.2.2" || got["latest_version"] != "v1.2.3" || got["update_available"] != true {
+		t.Fatalf("update output = %#v", got)
+	}
+	argv, ok := got["suggested_argv"].([]any)
+	if !ok {
+		t.Fatalf("suggested_argv = %#v", got["suggested_argv"])
+	}
+	if strings.Join(jsonStringSlice(t, argv), " ") != "winthrop update --json" {
+		t.Fatalf("suggested_argv = %#v", argv)
+	}
+}
+
+func TestUpdateCheckJSONWithTargetVersionDoesNotCallNetwork(t *testing.T) {
+	oldVersion := version
+	t.Cleanup(func() {
+		version = oldVersion
+	})
+	version = "v1.2.2"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected network request to %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	cmd := newRootCommand(app{
+		httpClient: http.DefaultClient,
+		store:      newFakeStore(),
+		updateClient: update.Client{
+			HTTP:       server.Client(),
+			APIBaseURL: server.URL,
+		},
+	})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"update", "--check", "--json", "--version", "v1.2.3"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decodeJSONObject(t, stdout.Bytes())
+	argv, ok := got["suggested_argv"].([]any)
+	if !ok {
+		t.Fatalf("suggested_argv = %#v", got["suggested_argv"])
+	}
+	if strings.Join(jsonStringSlice(t, argv), " ") != "winthrop update --json --version v1.2.3" {
+		t.Fatalf("suggested_argv = %#v", argv)
 	}
 }
 
@@ -1279,6 +1615,42 @@ func TestVersionCommandPrintsPassiveUpdateNotice(t *testing.T) {
 	if !strings.Contains(stderr.String(), "notice: winthrop v1.2.3 is available") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
+}
+
+func TestVersionJSONSuppressesPassiveUpdateNotice(t *testing.T) {
+	t.Chdir(t.TempDir())
+	oldVersion := version
+	t.Cleanup(func() {
+		version = oldVersion
+	})
+	version = "v1.2.2"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected update notice request to %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	cmd := newRootCommand(app{
+		httpClient: http.DefaultClient,
+		store:      newFakeStore(),
+		updateClient: update.Client{
+			HTTP:       server.Client(),
+			APIBaseURL: server.URL,
+		},
+		updateNoticeState: update.NoticeState{Path: filepath.Join(t.TempDir(), "update.json")},
+		updateNotices:     true,
+	})
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"version", "--json"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+	_ = decodeJSONObject(t, stdout.Bytes())
 }
 
 func TestVersionCommandHonorsDotenvUpdateNoticeOptOut(t *testing.T) {
