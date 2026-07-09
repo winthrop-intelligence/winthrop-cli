@@ -722,7 +722,7 @@ func TestWhoamiJSONPrintsIdentity(t *testing.T) {
 	cmd := newRootCommand(app{httpClient: authServer.Client(), store: fake})
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
-	cmd.SetArgs([]string{"whoami", "--json"})
+	cmd.SetArgs([]string{"--json", "whoami"})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -774,7 +774,7 @@ func TestWhoamiJSONIncludesEmptySubject(t *testing.T) {
 	cmd := newRootCommand(app{httpClient: authServer.Client(), store: fake})
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
-	cmd.SetArgs([]string{"whoami", "--json"})
+	cmd.SetArgs([]string{"--json", "whoami"})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -829,6 +829,41 @@ func TestLogoutDeletesStoredLogin(t *testing.T) {
 	}
 	if stdout.String() != "Logged out.\n" {
 		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestLogoutJSONDeletesStoredLogin(t *testing.T) {
+	t.Setenv(config.EnvAuthBaseURL, "https://auth.example.com")
+	t.Setenv(config.EnvAPIBaseURL, "https://api.example.com")
+	t.Setenv(config.EnvClientID, "client")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeStore()
+	account := store.RefreshAccount(cfg, "subject")
+	if err := fake.SaveRefreshToken(account, "refresh-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.SetActiveAccount(store.ActiveKey(cfg), account); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newRootCommand(app{httpClient: http.DefaultClient, store: fake})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"--json", "logout"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decodeJSONObject(t, stdout.Bytes())
+	if got["logged_out"] != true {
+		t.Fatalf("logout output = %#v", got)
+	}
+	if _, ok := fake.values["token:"+account]; ok {
+		t.Fatalf("refresh token still stored for %q", account)
 	}
 }
 
@@ -1041,7 +1076,7 @@ func TestDoctorJSONReportsFailures(t *testing.T) {
 	cmd := newRootCommand(app{httpClient: authServer.Client(), store: newFakeStore()})
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
-	cmd.SetArgs([]string{"doctor", "--json"})
+	cmd.SetArgs([]string{"--json", "doctor"})
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
 		t.Fatal("expected login failure")
@@ -1110,7 +1145,7 @@ func TestDoctorJSONReportsAccessTokenCacheState(t *testing.T) {
 	cmd := newRootCommand(app{httpClient: authServer.Client(), store: fake})
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
-	cmd.SetArgs([]string{"doctor", "--json"})
+	cmd.SetArgs([]string{"--json", "doctor"})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1276,7 +1311,7 @@ func TestVersionCommandPrintsJSON(t *testing.T) {
 	cmd := newRootCommand(app{httpClient: http.DefaultClient, store: newFakeStore()})
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
-	cmd.SetArgs([]string{"version", "--json"})
+	cmd.SetArgs([]string{"--json", "version"})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1287,10 +1322,25 @@ func TestVersionCommandPrintsJSON(t *testing.T) {
 	}
 }
 
+func TestRootHelpListsGlobalJSONFlag(t *testing.T) {
+	cmd := newRootCommand(app{httpClient: http.DefaultClient, store: newFakeStore()})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"--help"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := stdout.String()
+	if !strings.Contains(got, "--json") {
+		t.Fatalf("stdout = %q, want global --json flag", got)
+	}
+}
+
 func TestVersionJSONReportsWriteError(t *testing.T) {
 	cmd := newRootCommand(app{httpClient: http.DefaultClient, store: newFakeStore()})
 	cmd.SetOut(errorWriter{})
-	cmd.SetArgs([]string{"version", "--json"})
+	cmd.SetArgs([]string{"--json", "version"})
 	err := cmd.ExecuteContext(context.Background())
 	if err == nil {
 		t.Fatal("ExecuteContext error = nil")
@@ -1468,7 +1518,7 @@ func TestUpdateCheckPrintsJSON(t *testing.T) {
 	})
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
-	cmd.SetArgs([]string{"update", "--check", "--json"})
+	cmd.SetArgs([]string{"--json", "update", "--check"})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1481,7 +1531,7 @@ func TestUpdateCheckPrintsJSON(t *testing.T) {
 	if !ok {
 		t.Fatalf("suggested_argv = %#v", got["suggested_argv"])
 	}
-	if strings.Join(jsonStringSlice(t, argv), " ") != "winthrop update --json" {
+	if strings.Join(jsonStringSlice(t, argv), " ") != "winthrop --json update" {
 		t.Fatalf("suggested_argv = %#v", argv)
 	}
 }
@@ -1508,7 +1558,7 @@ func TestUpdateCheckJSONWithTargetVersionDoesNotCallNetwork(t *testing.T) {
 	})
 	var stdout bytes.Buffer
 	cmd.SetOut(&stdout)
-	cmd.SetArgs([]string{"update", "--check", "--json", "--version", "v1.2.3"})
+	cmd.SetArgs([]string{"--json", "update", "--check", "--version", "v1.2.3"})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1518,7 +1568,7 @@ func TestUpdateCheckJSONWithTargetVersionDoesNotCallNetwork(t *testing.T) {
 	if !ok {
 		t.Fatalf("suggested_argv = %#v", got["suggested_argv"])
 	}
-	if strings.Join(jsonStringSlice(t, argv), " ") != "winthrop update --json --version v1.2.3" {
+	if strings.Join(jsonStringSlice(t, argv), " ") != "winthrop --json update --version v1.2.3" {
 		t.Fatalf("suggested_argv = %#v", argv)
 	}
 }
@@ -1695,7 +1745,7 @@ func TestVersionJSONSuppressesPassiveUpdateNotice(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	cmd.SetArgs([]string{"version", "--json"})
+	cmd.SetArgs([]string{"--json", "version"})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatal(err)
 	}

@@ -103,6 +103,10 @@ type updateOutput struct {
 	SuggestedArgv   []string `json:"suggested_argv,omitempty"`
 }
 
+type logoutOutput struct {
+	LoggedOut bool `json:"logged_out"`
+}
+
 const jsonFlagName = "json"
 
 func NewRootCommand() *cobra.Command {
@@ -125,6 +129,7 @@ func newRootCommand(a app) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	cmd.PersistentFlags().Bool(jsonFlagName, false, "print machine-readable JSON for commands that support it")
 	cmd.AddCommand(
 		a.loginCommand(),
 		a.tokenCommand(),
@@ -325,7 +330,6 @@ func (a app) whoamiCommand() *cobra.Command {
 			return nil
 		},
 	})
-	addJSONFlag(cmd)
 	return cmd
 }
 
@@ -354,10 +358,17 @@ func (a app) logoutCommand() *cobra.Command {
 			if err := a.store.ClearActiveAccount(activeKey); err != nil {
 				return stderrError(cmd, fmt.Errorf("clear active login: %w", err))
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "Logged out.")
-			return nil
+			return renderLogout(cmd, logoutOutput{LoggedOut: true})
 		},
 	})
+}
+
+func renderLogout(cmd *cobra.Command, output logoutOutput) error {
+	if jsonOutputRequested(cmd) {
+		return writeJSON(cmd, output)
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "Logged out.")
+	return nil
 }
 
 func (a app) doctorCommand() *cobra.Command {
@@ -379,7 +390,6 @@ func (a app) doctorCommand() *cobra.Command {
 			return nil
 		},
 	})
-	addJSONFlag(cmd)
 	return a.withUpdateNotice(cmd)
 }
 
@@ -544,7 +554,6 @@ func (a app) updateCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&checkOnly, "check", false, "check for an update without installing it")
 	cmd.Flags().StringVar(&targetVersion, "version", "", "install a specific release tag")
 	cmd.Flags().StringVar(&installDir, "install-dir", "", "install directory for the winthrop binary")
-	addJSONFlag(cmd)
 	return cmd
 }
 
@@ -572,7 +581,6 @@ func (a app) versionCommand() *cobra.Command {
 			return nil
 		},
 	})
-	addJSONFlag(cmd)
 	return a.withUpdateNotice(cmd)
 }
 
@@ -587,10 +595,6 @@ func writeJSON(cmd *cobra.Command, value any) error {
 	encoder := json.NewEncoder(cmd.OutOrStdout())
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
-}
-
-func addJSONFlag(cmd *cobra.Command) {
-	cmd.Flags().Bool(jsonFlagName, false, "print machine-readable JSON")
 }
 
 func (a app) withUpdateNotice(cmd *cobra.Command) *cobra.Command {
@@ -617,7 +621,7 @@ func (a app) withUpdateNotice(cmd *cobra.Command) *cobra.Command {
 }
 
 func jsonOutputRequested(cmd *cobra.Command) bool {
-	value, err := cmd.Flags().GetBool(jsonFlagName)
+	value, err := cmd.Root().PersistentFlags().GetBool(jsonFlagName)
 	if err != nil {
 		return false
 	}
@@ -657,7 +661,7 @@ func updateSuggestedCommand(targetVersion string) string {
 }
 
 func updateSuggestedArgv(targetVersion string) []string {
-	argv := []string{"winthrop", "update", "--json"}
+	argv := []string{"winthrop", "--json", "update"}
 	targetVersion = strings.TrimSpace(targetVersion)
 	if targetVersion != "" {
 		argv = append(argv, "--version", targetVersion)
