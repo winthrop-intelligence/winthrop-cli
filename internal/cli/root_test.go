@@ -743,6 +743,52 @@ func TestWhoamiJSONPrintsIdentity(t *testing.T) {
 	}
 }
 
+func TestWhoamiJSONIncludesEmptySubject(t *testing.T) {
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(oauth.TokenResponse{AccessToken: "access-token"})
+	}))
+	defer authServer.Close()
+
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"display_name": "User Example"})
+	}))
+	defer apiServer.Close()
+
+	t.Setenv(config.EnvAuthBaseURL, authServer.URL)
+	t.Setenv(config.EnvAPIBaseURL, apiServer.URL)
+	t.Setenv(config.EnvClientID, "client")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeStore()
+	account := store.RefreshAccount(cfg, "subject")
+	if err := fake.SaveRefreshToken(account, "refresh-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.SetActiveAccount(store.ActiveKey(cfg), account); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := newRootCommand(app{httpClient: authServer.Client(), store: fake})
+	var stdout bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetArgs([]string{"whoami", "--json"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got := decodeJSONObject(t, stdout.Bytes())
+	subject, ok := got["subject"]
+	if !ok {
+		t.Fatalf("subject key missing from %q", stdout.String())
+	}
+	if subject != "" {
+		t.Fatalf("subject = %#v, want empty string", subject)
+	}
+}
+
 func TestLogoutDeletesStoredLogin(t *testing.T) {
 	t.Setenv(config.EnvAuthBaseURL, "https://auth.example.com")
 	t.Setenv(config.EnvAPIBaseURL, "https://api.example.com")
@@ -1078,8 +1124,14 @@ func TestDoctorJSONReportsAccessTokenCacheState(t *testing.T) {
 	if cacheCheck == nil {
 		t.Fatalf("checks = %#v, want access token cache check", checks)
 	}
-	if cacheCheck["status"] != "expired" {
+	if cacheCheck["status"] != "ok" {
 		t.Fatalf("cache status = %#v", cacheCheck["status"])
+	}
+	if cacheCheck["detail"] != "expired" {
+		t.Fatalf("cache detail = %#v", cacheCheck["detail"])
+	}
+	if _, ok := cacheCheck["Text"]; ok {
+		t.Fatalf("cache check serialized internal text field: %#v", cacheCheck)
 	}
 	if strings.Contains(stdout.String(), "cached-access") || strings.Contains(stdout.String(), "fresh-access") {
 		t.Fatalf("stdout leaked token: %q", stdout.String())

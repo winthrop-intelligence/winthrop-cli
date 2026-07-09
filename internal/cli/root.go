@@ -75,7 +75,7 @@ type versionOutput struct {
 }
 
 type whoamiOutput struct {
-	Subject  string       `json:"subject,omitempty"`
+	Subject  string       `json:"subject"`
 	Summary  string       `json:"summary"`
 	Identity api.Identity `json:"identity"`
 }
@@ -88,8 +88,10 @@ type doctorOutput struct {
 type doctorCheck struct {
 	Name    string `json:"name"`
 	Status  string `json:"status"`
+	Detail  string `json:"detail,omitempty"`
 	Message string `json:"message,omitempty"`
 	Fix     string `json:"fix,omitempty"`
+	Text    string `json:"-"`
 }
 
 type updateOutput struct {
@@ -447,8 +449,8 @@ func (a app) buildDoctorReport(ctx context.Context) doctorOutput {
 
 func renderDoctorText(cmd *cobra.Command, report doctorOutput) {
 	for _, check := range report.Checks {
-		if check.Name == "access_token_cache" {
-			fmt.Fprintln(cmd.OutOrStdout(), check.Message)
+		if check.Text != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), check.Text)
 			continue
 		}
 		label := doctorCheckLabel(check.Name)
@@ -743,19 +745,26 @@ func (a app) accessTokenCacheCheck(account string, now time.Time) doctorCheck {
 	status := a.inspectAccessTokenCache(account, now)
 	switch status.State {
 	case accessTokenCacheMissing:
-		return doctorCheck{Name: "access_token_cache", Status: "missing", Message: "access token cache: missing"}
+		message := "access token cache: missing"
+		return doctorCheck{Name: "access_token_cache", Status: "ok", Detail: "missing", Message: message, Text: message}
 	case accessTokenCacheReadError:
-		return doctorCheck{Name: "access_token_cache", Status: "unreadable", Message: fmt.Sprintf("access token cache: unreadable: %v", status.Err)}
+		message := fmt.Sprintf("access token cache: unreadable: %v", status.Err)
+		return doctorCheck{Name: "access_token_cache", Status: "ok", Detail: "unreadable", Message: message, Text: message}
 	case accessTokenCacheInvalid:
-		return doctorCheck{Name: "access_token_cache", Status: "unreadable", Message: "access token cache: unreadable"}
+		message := "access token cache: unreadable"
+		return doctorCheck{Name: "access_token_cache", Status: "ok", Detail: "unreadable", Message: message, Text: message}
 	case accessTokenCacheUsable:
-		return doctorCheck{Name: "access_token_cache", Status: "ok", Message: fmt.Sprintf("access token cache: ok, expires at %s", status.ExpiresAt.Format(accessTokenTimeFormat))}
+		message := fmt.Sprintf("access token cache: ok, expires at %s", status.ExpiresAt.Format(accessTokenTimeFormat))
+		return doctorCheck{Name: "access_token_cache", Status: "ok", Detail: "usable", Message: message, Text: message}
 	case accessTokenCacheRefreshNeeded:
-		return doctorCheck{Name: "access_token_cache", Status: "refresh_needed", Message: fmt.Sprintf("access token cache: refresh needed, expires at %s", status.ExpiresAt.Format(accessTokenTimeFormat))}
+		message := fmt.Sprintf("access token cache: refresh needed, expires at %s", status.ExpiresAt.Format(accessTokenTimeFormat))
+		return doctorCheck{Name: "access_token_cache", Status: "ok", Detail: "refresh_needed", Message: message, Text: message}
 	case accessTokenCacheExpired:
-		return doctorCheck{Name: "access_token_cache", Status: "expired", Message: fmt.Sprintf("access token cache: expired at %s", status.ExpiresAt.Format(accessTokenTimeFormat))}
+		message := fmt.Sprintf("access token cache: expired at %s", status.ExpiresAt.Format(accessTokenTimeFormat))
+		return doctorCheck{Name: "access_token_cache", Status: "ok", Detail: "expired", Message: message, Text: message}
 	default:
-		return doctorCheck{Name: "access_token_cache", Status: "unreadable", Message: "access token cache: unreadable"}
+		message := "access token cache: unreadable"
+		return doctorCheck{Name: "access_token_cache", Status: "ok", Detail: "unreadable", Message: message, Text: message}
 	}
 }
 
