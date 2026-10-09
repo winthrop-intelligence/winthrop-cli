@@ -44,7 +44,7 @@ Production auth, API, client ID, and scopes are built into the released CLI. Mos
 winthrop login
 ```
 
-For local development or support overrides, set any of these environment variables:
+To override the built-in defaults, set any of these environment variables:
 
 ```sh
 # export WINTHROP_AUTH_BASE_URL="https://winad-hq.com"
