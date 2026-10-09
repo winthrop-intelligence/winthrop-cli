@@ -59,6 +59,31 @@ Set `WINTHROP_UPDATE_CHECK=0` to disable passive update notices.
 
 For local development, you can put the same keys in a `.env` file in the working directory. Real environment variables take precedence over values from `.env`.
 
+### Read-Only by Default
+
+The built-in client ID belongs to a read-only OAuth application, and the default scopes are `winad_read offline_access`. A plain `winthrop login` can read data but cannot change it; write requests return HTTP 403.
+
+Write access requires a different OAuth application. Each application only grants the scopes on its own allow-list, so requesting extra scopes with the default client ID does not add write access. If you need to make changes, ask a WinAD administrator for the client ID of the write-enabled application, then log in with both overrides set:
+
+```sh
+export WINTHROP_CLIENT_ID="write-enabled-client-id"
+export WINTHROP_SCOPES="winad_read winad_write offline_access"
+winthrop login
+```
+
+Add `winad_verify` to `WINTHROP_SCOPES` if you also record contract verifications.
+
+Keep in mind:
+
+- Logins are stored per client ID. A shell without these variables uses the read-only login, even if you have also logged in with the write-enabled application.
+- Scopes are fixed when you log in; token refreshes keep the original scopes. After changing `WINTHROP_SCOPES`, run `winthrop login` again.
+
+To check which scopes the current login has:
+
+```sh
+winthrop api /oauth/token/info
+```
+
 ## Interactive Login
 
 ```sh
@@ -181,6 +206,7 @@ Common fixes:
 - Secure storage failure: unlock or configure your OS credential store.
 - Not logged in: run `winthrop login`.
 - Token refresh failure: run `winthrop login` again.
+- HTTP 403 on writes: the current login is read-only. See [Read-Only by Default](#read-only-by-default).
 - Auth/API unreachable: verify the base URL environment variables and network access.
 
 ## Releases
