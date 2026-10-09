@@ -57,7 +57,7 @@ For local development or support overrides, set any of these environment variabl
 `WINTHROP_SCOPES` accepts space-separated OAuth scopes.
 Set `WINTHROP_UPDATE_CHECK=0` to disable passive update notices.
 
-For local development, you can put the same keys in a `.env` file in the working directory. Real environment variables take precedence over values from `.env`.
+You can also put the same keys in a `.env` file in the directory where you run `winthrop`. This works with released binaries too. Real environment variables take precedence over values from `.env`.
 
 ### Read-Only by Default
 
@@ -71,11 +71,11 @@ export WINTHROP_SCOPES="winad_read winad_write offline_access"
 winthrop login
 ```
 
-Add `winad_verify` to `WINTHROP_SCOPES` if you also record contract verifications.
+Or set the same two keys in a `.env` file in the directory where you run `winthrop`. Add `winad_verify` to `WINTHROP_SCOPES` if you also record contract verifications.
 
 Keep in mind:
 
-- Logins are stored per client ID. A shell without these variables uses the read-only login, even if you have also logged in with the write-enabled application.
+- Logins are stored per client ID. Running `winthrop` without these variables, or outside the directory with your `.env`, uses the read-only login, even if you have also logged in with the write-enabled application.
 - Scopes are fixed when you log in; token refreshes keep the original scopes. After changing `WINTHROP_SCOPES`, run `winthrop login` again.
 
 To check which scopes the current login has:
